@@ -6,7 +6,7 @@ The latest release is available from
 ## Clone the source
 
 ```bash
-git clone --branch v0.1.1 --depth 1 \
+git clone --branch v0.2.0 --depth 1 \
   https://github.com/iSaaacH/VantagePath.git
 cd VantagePath
 ```
@@ -17,9 +17,9 @@ Run this from your robot project root:
 
 ```bash
 git submodule add https://github.com/iSaaacH/VantagePath.git vendor/VantagePath
-git -C vendor/VantagePath checkout v0.1.1
+git -C vendor/VantagePath checkout v0.2.0
 git add .gitmodules vendor/VantagePath
-git commit -m "Add VantagePath v0.1.1"
+git commit -m "Add VantagePath v0.2.0"
 ```
 
 When somebody clones the parent project, they should use:

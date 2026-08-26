@@ -8,7 +8,7 @@ You need Git, CMake 3.16 or newer, and a C++17 compiler.
 Open a terminal and run each command:
 
 ```bash
-git clone --branch v0.1.1 --depth 1 \
+git clone --branch v0.2.0 --depth 1 \
   https://github.com/iSaaacH/VantagePath.git
 cd VantagePath
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -24,7 +24,7 @@ From your project root:
 
 ```bash
 git submodule add https://github.com/iSaaacH/VantagePath.git vendor/VantagePath
-git -C vendor/VantagePath checkout v0.1.1
+git -C vendor/VantagePath checkout v0.2.0
 ```
 
 Add these lines to your `CMakeLists.txt`:
@@ -49,7 +49,7 @@ Open the PROS integrated terminal at the root of an existing project.
 ```bash
 git submodule add \
   https://github.com/iSaaacH/VantagePath.git src/vendor/VantagePath
-git -C src/vendor/VantagePath checkout v0.1.1
+git -C src/vendor/VantagePath checkout v0.2.0
 ```
 
 Add the following to the user-configurable section of `Makefile`, before
