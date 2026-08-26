@@ -1,32 +1,32 @@
-# VantagePath
+# Documentation Home
 
-VantagePath turns a small set of poses into a physically achievable,
-time-indexed trajectory and closes the loop at both robot-pose and wheel-speed
-levels. It targets differential/tank drivetrains and keeps hardware access
-outside the library.
+Welcome to the VantagePath documentation. VantagePath is a C++17 trajectory
+generation and control library for differential-drive robots.
 
-## What problem it solves
+If this is your first time using VantagePath, follow the numbered
+[tutorials](tutorials/1-getting-started.md) in order. They begin with a blank
+project and end with constrained, multi-segment autonomous trajectories,
+diagnostics, and safe robot commissioning.
 
-Point-to-point PID and fixed-lookahead pure pursuit answer “where should I aim?”
-but not “where should the robot be at this time, at what velocity and
-acceleration?” That omission makes aggressive corners, voltage sag, wheel-speed
-mismatch, and precise arrival harder to manage. VantagePath carries position,
-heading, curvature, velocity, acceleration, and time through the entire stack.
+If VantagePath is already configured and you need a class or function, go
+straight to the [API reference](reference/index.md).
 
-## Coordinate and unit contract
+!!! warning "Robot testing is required"
 
-- `x` points forward at zero heading; `y` points left.
-- heading is radians, counter-clockwise positive.
-- use any internally consistent length unit. SI metres are strongly recommended.
-- time is seconds, angular velocity is radians/second, output is volts.
-- encoder distance and wheel velocity must use the same length unit as paths.
+    Example gains are deliberately conservative. Wheel diameter, track width,
+    feedforward, feedback gains, and trajectory limits must be measured on your
+    own drivetrain before full-speed use.
 
-## Start here
+## What VantagePath provides
 
-1. Read [Architecture](architecture.md).
-2. Characterize and tune in the exact order in [Tuning](tuning.md).
-3. Implement the thin sensor/motor adapter described in [API](api.md).
-4. Pass every item in the [Safety checklist](safety.md).
+- C2-continuous quintic spline generation
+- velocity, acceleration, deceleration, wheel-speed, centripetal, and voltage constraints
+- time-indexed nonlinear pose feedback
+- independent wheel feedforward and velocity feedback
+- anti-windup, derivative filtering, and battery-aware voltage desaturation
+- differential-drive SE(2) odometry
+- explicit settled, timed-out, diverged, saturated, and cancelled states
+- no dependency on PROS, WPILib, an RTOS, or a particular motor vendor
 
-VantagePath is not a substitute for measuring wheel diameter, effective track
-width, motor feedforward, sensor signs, or loop timing on the real robot.
+[:material-rocket-launch: Start the tutorials](tutorials/1-getting-started.md){ .md-button .md-button--primary }
+[:material-code-braces: Open the API reference](reference/index.md){ .md-button }

@@ -40,9 +40,9 @@ limits.maxAcceleration = 2.2;     // m/s^2
 limits.maxWheelVelocity = 2.1;    // m/s
 
 auto trajectory = vantage::generateTrajectory({
-  {{{0.0, 0.0, 0.0}}},
-  {{{1.0, 0.6, 0.7}}},
-  {{{2.0, 1.0, 0.0}}},
+  {{0.0, 0.0, 0.0}},
+  {{1.0, 0.6, 0.7}},
+  {{2.0, 1.0, 0.0}},
 }, limits);
 
 vantage::FollowerConfig gains;
@@ -59,8 +59,9 @@ auto out = follower.update(nowSeconds(), measuredPose(), measuredWheelSpeeds(),
 setDriveVoltage(out.leftVoltage, out.rightVoltage);
 ```
 
-See the [documentation](https://isaaach.github.io/VantagePath/) for the API,
-the control design, a LemLib comparison, tuning order, and integration guide.
+Follow the numbered [getting-started
+tutorials](https://isaaach.github.io/VantagePath/tutorials/1-getting-started/) or
+open the [API reference](https://isaaach.github.io/VantagePath/reference/).
 
 ## Build and test
 

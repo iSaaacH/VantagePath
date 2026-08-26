@@ -1,18 +1,84 @@
-site_name: VantagePath
-site_description: Robust trajectory control for differential-drive robots
+site_name: VantagePath documentation
+site_description: Advanced trajectory control for differential-drive robots
 site_url: https://isaaach.github.io/VantagePath/
 repo_url: https://github.com/iSaaacH/VantagePath
+repo_name: iSaaacH/VantagePath
+edit_uri: edit/main/docs/
 theme:
-  name: mkdocs
+  name: material
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - content.code.copy
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep orange
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep orange
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+plugins:
+  - search
 nav:
-  - Overview: index.md
-  - Architecture: architecture.md
-  - API: api.md
-  - Tuning: tuning.md
-  - LemLib comparison: lemlib-comparison.md
-  - Safety checklist: safety.md
+  - Home:
+      - Documentation Home: index.md
+      - About: about.md
+      - Download: download.md
+      - Support: support.md
+  - Tutorials:
+      - 1 - Getting Started: tutorials/1-getting-started.md
+      - 2 - Configuration: tutorials/2-configuration.md
+      - 3 - Driver Control: tutorials/3-driver-control.md
+      - 4 - Characterization & Tuning: tutorials/4-tuning.md
+      - 5 - Angular Motions: tutorials/5-angular-motions.md
+      - 6 - Lateral Motions: tutorials/6-lateral-motions.md
+      - 7 - Trajectory Following: tutorials/7-trajectory-following.md
+      - 8 - Motion Chaining: tutorials/8-motion-chaining.md
+      - 9 - Diagnostics & Safety: tutorials/9-diagnostics-safety.md
+  - Reference:
+      - API Reference: reference/index.md
+      - Geometry: reference/geometry.md
+      - Trajectory: reference/trajectory.md
+      - Control: reference/control.md
+      - Odometry: reference/odometry.md
+      - Follower: reference/follower.md
+  - Design:
+      - Architecture: architecture.md
+      - Tuning Checklist: tuning.md
+      - Safety Checklist: safety.md
+      - LemLib Comparison: lemlib-comparison.md
 markdown_extensions:
   - admonition
+  - attr_list
+  - def_list
+  - footnotes
   - tables
   - toc:
       permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+extra_css:
+  - stylesheets/extra.css
+copyright: Copyright &copy; 2026 VantagePath contributors
