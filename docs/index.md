@@ -29,5 +29,7 @@ straight to the [API reference](reference/index.md).
 - explicit settled, timed-out, diverged, saturated, and cancelled states
 - no dependency on PROS, WPILib, an RTOS, or a particular motor vendor
 
-[:material-rocket-launch: Start the tutorials](tutorials/1-getting-started.md){ .md-button .md-button--primary }
-[:material-code-braces: Open the API reference](reference/index.md){ .md-button }
+[Begin: install VantagePath](tutorials/1-getting-started.md){ .md-button .md-button--primary }
+[Configure your drivetrain](tutorials/2-configuration.md){ .md-button }
+[Compare VantagePath with LemLib](lemlib-comparison.md){ .md-button }
+[Browse the API reference](reference/index.md){ .md-button }

@@ -64,7 +64,7 @@ nav:
       - Architecture: architecture.md
       - Tuning Checklist: tuning.md
       - Safety Checklist: safety.md
-      - LemLib Comparison: lemlib-comparison.md
+      - VantagePath vs LemLib: lemlib-comparison.md
 markdown_extensions:
   - admonition
   - attr_list

@@ -1,40 +1,174 @@
-# 2 - Configuration
+# 2 - Configure the Drivetrain
 
-Most path-following failures begin as configuration errors. Complete each
-section before tuning gains.
+This page starts with raw motor degrees and ends with validated wheel distance,
+heading, track width, odometry, trajectory limits, and follower configuration.
+Complete it on a disabled robot before tuning any controller gains.
 
-## Choose one unit system
+## What you need to measure
 
-VantagePath accepts any consistent length unit. Metres are recommended for new
-projects; inches are also valid.
+Write these values down before editing code:
 
-| Quantity | Metre project | Inch project |
-|---|---:|---:|
-| pose | m | in |
-| wheel distance | m | in |
-| wheel velocity | m/s | in/s |
-| track width | m | in |
-| acceleration | m/s² | in/s² |
-| heading | rad | rad |
-| voltage | V | V |
+| Measurement | Example | Your value |
+| --- | ---: | ---: |
+| Loaded wheel diameter | `0.06985 m` | |
+| Wheel turns per encoder turn | `0.75` | |
+| Physical left-to-right track width | `0.305 m` | |
+| Control period | `0.010 s` | |
+| Maximum commissioning voltage | `6.0 V` | |
 
-Never pass degrees to `vantage::Pose2d::theta`.
+Use metres throughout this tutorial. Inches also work, but every position,
+distance, speed, acceleration, and track-width value must then use inches.
+Angles are always radians inside VantagePath.
 
-## Measure the drivetrain
+## Step 1: define wheel diameter and gearing
 
-1. Measure loaded wheel diameter at the tread.
-2. Push the robot forward exactly one wheel revolution.
-3. Confirm both reported wheel distances are positive and close to one wheel circumference.
-4. Rotate the robot several full turns.
-5. Adjust effective track width until odometry reports the measured rotation.
-
-Create a configuration function:
+Measure the wheel while it carries the robot's weight. Tread compression can
+make the effective diameter different from the value printed on the wheel.
 
 ```cpp
+constexpr double kWheelDiameter = 0.06985;  // loaded diameter, metres
+
+// A 36-tooth encoder/motor gear driving a 48-tooth wheel gear:
+constexpr double kWheelTurnsPerEncoderTurn = 36.0 / 48.0;
+```
+
+The ratio means `wheel rotations / encoder rotations`. For direct drive, use
+`1.0`. Convert cumulative encoder degrees to cumulative wheel distance:
+
+```cpp
+double wheelDistance(double encoderDegrees) {
+  const double encoderTurns = encoderDegrees / 360.0;
+  const double wheelTurns = encoderTurns * kWheelTurnsPerEncoderTurn;
+  return wheelTurns * vantage::kPi * kWheelDiameter;
+}
+```
+
+### Check the conversion
+
+1. Mark one wheel and the floor.
+2. Push the robot forward exactly 10 wheel revolutions.
+3. Record left and right encoder degrees.
+4. Run both readings through `wheelDistance()`.
+5. Compare the result with tape-measure distance.
+
+Both calculated distances must be positive when moving forward. Correct a
+reversed motor/encoder sign in hardware configuration, not in controller gains.
+If the scale is wrong, correct wheel diameter or gearing before moving on.
+
+## Step 2: configure fused drive encoders in PROS
+
+If every motor on one side shares an output shaft, VantagePath can fuse all of
+their encoders instead of trusting one motor:
+
+```cpp
+#include <vantage/pros.hpp>
+
+const std::vector<vantage::pros::DriveMotorSpec> leftMotorSpecs = {
+    // port, real cartridge, encoder-to-common-shaft multiplier
+    {-7, pros::v5::MotorGears::blue, 1.0},
+    {-2, pros::v5::MotorGears::blue, 1.0},
+    {-6, pros::v5::MotorGears::green, 3.0},
+};
+
+vantage::pros::FusedDrive leftDrive(
+    leftMotorSpecs,
+    {12.0, 0.5, true}); // absolute gate, relative gate, reject outliers
+```
+
+The third motor's encoder turns one third as far as the common shaft, so its
+`toCommon` value is `3.0`. Use `1.0` when an encoder already measures the common
+shaft directly. Configure the right side the same way.
+
+Apply each physical cartridge during robot initialization:
+
+```cpp
+leftDrive.initialize();
+rightDrive.initialize();
+```
+
+Read cumulative common-shaft degrees with `get_position()`, then pass that
+number to `wheelDistance()`.
+
+!!! note
+    `toCommon` normalizes motors coupled to the same shaft. The separate
+    `kWheelTurnsPerEncoderTurn` converts that shared shaft to wheel rotation.
+    Do not accidentally combine the two ratios.
+
+## Step 3: configure and verify heading
+
+With two PROS inertial sensors:
+
+```cpp
+vantage::pros::FusedImu imu(
+    15,   // primary port
+    20,   // secondary port
+    3.0); // allowed disagreement per control tick, degrees
+```
+
+Initialize them before starting the odometry task:
+
+```cpp
+imu.reset(false);
+while (imu.is_calibrating()) pros::delay(10);
+imu.set_data_rate(10);
+```
+
+Convert continuous degrees to radians:
+
+```cpp
+double headingRadians() {
+  return imu.get_rotation() * vantage::kPi / 180.0;
+}
+```
+
+Turn the robot counter-clockwise. The heading passed to VantagePath must
+increase. Negate it once in `headingRadians()` if the sensor convention is the
+opposite. Do not negate it again elsewhere.
+
+## Step 4: measure effective track width
+
+Physical wheel spacing is only a starting estimate. Tank-drive scrub changes
+the width that best predicts rotation. VantagePath uses this effective track
+width for wheel-speed constraints and differential-drive kinematics.
+
+1. Put the robot on its normal field surface.
+2. Record cumulative left distance `L0`, right distance `R0`, and heading `H0`.
+3. Slowly rotate counter-clockwise at least five complete turns.
+4. Record `L1`, `R1`, and `H1`.
+5. Calculate:
+
+```text
+deltaLeft  = L1 - L0
+deltaRight = R1 - R0
+deltaTheta = H1 - H0             (continuous radians, do not wrap)
+
+effectiveTrackWidth = (deltaRight - deltaLeft) / deltaTheta
+```
+
+Repeat clockwise and counter-clockwise three times. Use the median absolute
+result. A trial far from the others usually means wheel slip, wrapped heading,
+or an encoder-sign error.
+
+Example:
+
+```text
+left travel  = -4.80 m
+right travel =  4.78 m
+heading      = 31.42 rad (five turns)
+track width  = (4.78 - -4.80) / 31.42 = 0.305 m
+```
+
+## Step 5: define one shared track-width constant
+
+The planner and follower must use the same measured value:
+
+```cpp
+constexpr double kTrackWidth = 0.305;
+
 vantage::TrajectoryConfig trajectoryConfig() {
   vantage::TrajectoryConfig cfg;
-  cfg.trackWidth = 0.305;                 // measured metres
-  cfg.maxVelocity = 1.2;                  // conservative first test
+  cfg.trackWidth = kTrackWidth;
+  cfg.maxVelocity = 1.2;
   cfg.maxAcceleration = 1.0;
   cfg.maxDeceleration = 1.2;
   cfg.maxCentripetalAcceleration = 1.0;
@@ -45,19 +179,10 @@ vantage::TrajectoryConfig trajectoryConfig() {
   cfg.rightFeedforward = {0.36, 5.0, 0.23};
   return cfg;
 }
-```
 
-The feedforward numbers above are examples only. Tutorial 4 replaces them with
-measurements from your robot.
-
-## Configure the follower
-
-The follower track width must match the trajectory configuration:
-
-```cpp
 vantage::FollowerConfig followerConfig() {
   vantage::FollowerConfig cfg;
-  cfg.trackWidth = 0.305;
+  cfg.trackWidth = kTrackWidth;
   cfg.nominalVoltage = 6.0;
   cfg.leftFeedforward = {0.35, 5.1, 0.22};
   cfg.rightFeedforward = {0.36, 5.0, 0.23};
@@ -74,66 +199,51 @@ vantage::FollowerConfig followerConfig() {
 }
 ```
 
-Create long-lived objects after the hardware objects they read:
+These feedforward and feedback values are examples, not universal gains.
+[Tutorial 4](4-tuning.md) explains how to replace them with measurements.
+
+## Step 6: seed odometry
+
+Create long-lived objects:
 
 ```cpp
 vantage::DifferentialDriveOdometry odometry;
 vantage::TrajectoryFollower follower(followerConfig());
 ```
 
-## Calibrate and seed odometry
-
-After the IMU finishes calibration, seed cumulative wheel distance and heading:
+After IMU calibration, seed odometry with current cumulative sensor readings:
 
 ```cpp
 odometry.reset(
     {0.0, 0.0, 0.0},
-    readLeftDistance(),
-    readRightDistance(),
-    readHeadingRadians());
+    wheelDistance(leftDrive.get_position()),
+    wheelDistance(rightDrive.get_position()),
+    headingRadians());
 ```
 
-Print the pose while pushing the disabled robot. Forward movement should
-increase `x`; moving left should increase `y`; counter-clockwise rotation
-should increase `theta`.
-
-!!! danger
-
-    Do not compensate for a reversed encoder by changing controller gains.
-    Correct the sensor or motor sign first.
-
-## Use the built-in PROS fusion classes
-
-PROS projects do not need to write their own multi-motor encoder or dual-IMU
-wrappers. Include the optional adapters:
+Then update it every 10–20 ms:
 
 ```cpp
-#include <vantage/pros.hpp>
-
-vantage::pros::FusedDrive leftDrive(
-    {
-        {-7, pros::v5::MotorGears::blue, 1.0},
-        {-2, pros::v5::MotorGears::blue, 1.0},
-        {-6, pros::v5::MotorGears::green, 3.0},
-    },
-    {12.0, 0.5, true});
-
-vantage::pros::FusedImu heading(15, 20, 3.0);
+const vantage::Pose2d pose = odometry.update(
+    wheelDistance(leftDrive.get_position()),
+    wheelDistance(rightDrive.get_position()),
+    headingRadians());
 ```
 
-The final number in each motor entry converts that encoder to common-shaft
-degrees. Use `1.0` when it is direct. During `initialize()`:
+## Step 7: perform the disabled push test
 
-```cpp
-leftDrive.initialize();
-heading.reset(false);
-while (heading.is_calibrating()) pros::delay(10);
-heading.set_data_rate(10);
-```
+Print `pose.x`, `pose.y`, and `pose.theta` while moving the disabled robot:
 
-Convert `leftDrive.get_position()` to wheel distance using wheel circumference
-and the external ratio, and convert `heading.get_rotation()` to radians before
-passing them to odometry. See [Sensor Fusion and PROS
-adapters](../reference/sensor-fusion.md) for failure behavior and telemetry.
+1. Push forward exactly 1 m: X should increase by approximately 1 m.
+2. Pull backward to the start: X should return close to zero.
+3. Rotate counter-clockwise 360°: the raw continuous IMU reading should
+   increase by about `2*pi` radians, while the wrapped odometry heading returns
+   close to zero and X/Y remain close to their starting values.
+4. Repeat clockwise.
+5. Watch `contributing()` and per-sensor `rejected()` diagnostics. Healthy
+   sensors should not disappear during ordinary motion.
+
+Do not start controller tuning until these checks pass. A controller cannot
+correct incorrect units, gearing, signs, or geometry.
 
 Continue to [3 - Driver Control](3-driver-control.md).
