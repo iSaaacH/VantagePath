@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -111,6 +112,33 @@ int main() {
   Pose2d pose = odometry.update(1, 1, 0);
   near(pose.x, 1.0, 1e-9, "odometry integrates forward travel");
   near(pose.y, 0.0, 1e-9, "straight odometry has no lateral travel");
+
+  IncrementalSensorFusion encoderFusion(3, {1.0, 0.5, true});
+  encoderFusion.update({0.0, 10.0, 100.0});
+  near(encoderFusion.update({5.0, 15.0, 105.0}).value, 5.0, 1e-12,
+       "fusion averages matching sensor deltas with different zeros");
+  const FusionOutput rejectedEncoder =
+      encoderFusion.update({10.0, 20.0, 205.0});
+  near(rejectedEncoder.value, 10.0, 1e-12,
+       "fusion rejects an encoder spike backed by peer consensus");
+  expect(rejectedEncoder.contributing == 2 && encoderFusion.rejected(2),
+         "fusion reports rejected encoder and contributor count");
+  const double dead = std::numeric_limits<double>::infinity();
+  near(encoderFusion.update({15.0, 25.0, dead}).value, 15.0, 1e-12,
+       "fusion continues after one sensor disconnects");
+  encoderFusion.update({20.0, 30.0, 210.0});
+  near(encoderFusion.update({25.0, 35.0, 215.0}).value, 25.0, 1e-12,
+       "returning sensor reseeds without injecting its missing interval");
+
+  IncrementalSensorFusion imuFusion(2, {3.0, 0.0, true});
+  imuFusion.update({0.0, 0.0});
+  near(imuFusion.update({1.0, 1.2}).value, 1.1, 1e-12,
+       "dual IMU fusion averages agreeing changes");
+  const FusionOutput imuGlitch = imuFusion.update({2.0, 20.0});
+  near(imuGlitch.value, 2.1, 1e-12,
+       "dual IMU fusion follows the continuous sensor during a glitch");
+  expect(imuGlitch.contributing == 1 && imuFusion.rejected(1),
+         "dual IMU fusion exposes the rejected sensor");
 
   FollowerConfig followerConfig;
   followerConfig.trackWidth = config.trackWidth;

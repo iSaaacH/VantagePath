@@ -18,6 +18,7 @@ always radians and radians per second.
 | [Trajectory](trajectory.md) | Quintic paths and constraint-aware time parameterization |
 | [Control](control.md) | Differential-drive kinematics, pose feedback, feedforward, and wheel PID |
 | [Odometry](odometry.md) | Encoder and gyro integration on SE(2) |
+| [Sensor Fusion & PROS](sensor-fusion.md) | Fault-tolerant encoders, dual IMUs, and built-in V5 adapters |
 | [Follower](follower.md) | End-to-end trajectory execution, termination, and diagnostics |
 
 ## Execution model
@@ -31,4 +32,3 @@ I/O, timing, logging, and the autonomous state machine.
     `TrajectoryFollower::start()` stores a pointer to the supplied
     `Trajectory`. Keep that trajectory alive until the follower finishes or is
     cancelled.
-

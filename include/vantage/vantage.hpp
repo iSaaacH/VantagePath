@@ -4,4 +4,5 @@
 #include "vantage/follower.hpp"
 #include "vantage/geometry.hpp"
 #include "vantage/odometry.hpp"
+#include "vantage/sensor_fusion.hpp"
 #include "vantage/trajectory.hpp"

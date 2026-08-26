@@ -5,6 +5,7 @@ add_library(vantagepath
   src/controller.cpp
   src/follower.cpp
   src/odometry.cpp
+  src/sensor_fusion.cpp
   src/trajectory.cpp)
 add_library(VantagePath::VantagePath ALIAS vantagepath)
 

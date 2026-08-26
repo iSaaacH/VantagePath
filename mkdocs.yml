@@ -58,6 +58,7 @@ nav:
       - Trajectory: reference/trajectory.md
       - Control: reference/control.md
       - Odometry: reference/odometry.md
+      - Sensor Fusion & PROS: reference/sensor-fusion.md
       - Follower: reference/follower.md
   - Design:
       - Architecture: architecture.md

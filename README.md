@@ -25,6 +25,7 @@ waypoints -> quintic spline -> physical constraints -> timed states
 - separate left/right `kS + kV*v + kA*a` feedforward and wheel velocity PID
 - derivative filtering, conditional-integration anti-windup, voltage desaturation
 - fused-gyro differential odometry and framework-neutral units
+- built-in fault-tolerant PROS `FusedDrive` and dual-IMU `FusedImu` adapters
 - settle window, timeout, cancel, saturation telemetry, and divergence abort
 - host-side tests and a documented hardware adapter boundary
 

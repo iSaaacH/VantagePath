@@ -25,6 +25,7 @@ straight to the [API reference](reference/index.md).
 - independent wheel feedforward and velocity feedback
 - anti-windup, derivative filtering, and battery-aware voltage desaturation
 - differential-drive SE(2) odometry
+- built-in fused drive-encoder and dual-IMU classes for PROS
 - explicit settled, timed-out, diverged, saturated, and cancelled states
 - no dependency on PROS, WPILib, an RTOS, or a particular motor vendor
 

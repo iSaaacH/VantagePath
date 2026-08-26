@@ -102,4 +102,38 @@ should increase `theta`.
     Do not compensate for a reversed encoder by changing controller gains.
     Correct the sensor or motor sign first.
 
+## Use the built-in PROS fusion classes
+
+PROS projects do not need to write their own multi-motor encoder or dual-IMU
+wrappers. Include the optional adapters:
+
+```cpp
+#include <vantage/pros.hpp>
+
+vantage::pros::FusedDrive leftDrive(
+    {
+        {-7, pros::v5::MotorGears::blue, 1.0},
+        {-2, pros::v5::MotorGears::blue, 1.0},
+        {-6, pros::v5::MotorGears::green, 3.0},
+    },
+    {12.0, 0.5, true});
+
+vantage::pros::FusedImu heading(15, 20, 3.0);
+```
+
+The final number in each motor entry converts that encoder to common-shaft
+degrees. Use `1.0` when it is direct. During `initialize()`:
+
+```cpp
+leftDrive.initialize();
+heading.reset(false);
+while (heading.is_calibrating()) pros::delay(10);
+heading.set_data_rate(10);
+```
+
+Convert `leftDrive.get_position()` to wheel distance using wheel circumference
+and the external ratio, and convert `heading.get_rotation()` to radians before
+passing them to odometry. See [Sensor Fusion and PROS
+adapters](../reference/sensor-fusion.md) for failure behavior and telemetry.
+
 Continue to [3 - Driver Control](3-driver-control.md).
