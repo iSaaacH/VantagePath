@@ -12,12 +12,23 @@ struct Waypoint {
   double tangentScale = 0.0;  // 0 chooses a distance-based tangent.
 };
 
+struct DriveFeedforwardConstraint {
+  double staticGain = 0.0;
+  double velocityGain = 0.0;
+  double accelerationGain = 0.0;
+};
+
 struct TrajectoryConfig {
   double maxVelocity = 1.5;
   double maxAcceleration = 2.0;
   double maxDeceleration = 2.5;
   double maxCentripetalAcceleration = 2.0;
   double maxWheelVelocity = 1.8;
+  // Set maxVoltage > 0 and identify both feedforwards to constrain local
+  // acceleration against motor voltage, including curvature-rate wheel accel.
+  double maxVoltage = 0.0;
+  DriveFeedforwardConstraint leftFeedforward;
+  DriveFeedforwardConstraint rightFeedforward;
   double trackWidth = 0.30;
   double startVelocity = 0.0;
   double endVelocity = 0.0;

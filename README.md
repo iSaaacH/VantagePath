@@ -20,6 +20,7 @@ waypoints -> quintic spline -> physical constraints -> timed states
 - C2-continuous quintic Hermite paths with automatic tangent selection
 - forward/backward time parameterization
 - chassis speed, wheel speed, acceleration, deceleration, and centripetal limits
+- optional per-side feedforward voltage constraint during time parameterization
 - velocity-scheduled nonlinear pose feedback with bounded corrections
 - separate left/right `kS + kV*v + kA*a` feedforward and wheel velocity PID
 - derivative filtering, conditional-integration anti-windup, voltage desaturation

@@ -46,6 +46,24 @@ int main() {
            "trajectory respects chassis velocity");
   }
 
+  TrajectoryConfig voltageConfig = config;
+  voltageConfig.maxVelocity = 4.0;
+  voltageConfig.maxWheelVelocity = 4.0;
+  voltageConfig.maxAcceleration = 10.0;
+  voltageConfig.maxDeceleration = 10.0;
+  voltageConfig.maxVoltage = 4.0;
+  voltageConfig.leftFeedforward = {0.2, 2.0, 0.5};
+  voltageConfig.rightFeedforward = voltageConfig.leftFeedforward;
+  const Trajectory voltageLimited = generateTrajectory(
+      {{{0, 0, 0}}, {{4, 0, 0}}}, voltageConfig);
+  for (const auto& state : voltageLimited.states()) {
+    const double sign = state.velocity > 1e-9 ? 1.0 : 0.0;
+    const double plannedVoltage = 0.2 * sign + 2.0 * state.velocity +
+                                  0.5 * state.acceleration;
+    expect(std::abs(plannedVoltage) <= voltageConfig.maxVoltage + 0.08,
+           "time parameterization respects feedforward voltage");
+  }
+
   const Trajectory curve = generateTrajectory(
       {{{0, 0, 0}}, {{1, 1, vantage::kPi / 2.0}}}, config);
   for (const auto& state : curve.states()) {

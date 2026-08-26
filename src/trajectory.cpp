@@ -12,6 +12,7 @@ namespace {
 struct Sample {
   Pose2d pose;
   double curvature;
+  double curvatureDerivative = 0.0;
   double distance;
 };
 
@@ -59,6 +60,50 @@ void validate(const TrajectoryConfig& c) {
       c.startVelocity > c.maxVelocity || c.endVelocity > c.maxVelocity) {
     throw std::invalid_argument("boundary velocities must be within limits");
   }
+  if (c.maxVoltage > 0.0 &&
+      (!(c.leftFeedforward.accelerationGain > 0.0) ||
+       !(c.rightFeedforward.accelerationGain > 0.0))) {
+    throw std::invalid_argument(
+        "voltage constraint requires positive left/right acceleration gains");
+  }
+}
+
+struct AccelerationBounds { double minimum; double maximum; };
+
+AccelerationBounds voltageAccelerationBounds(const Sample& sample, double speed,
+                                              const TrajectoryConfig& config) {
+  AccelerationBounds bounds{-config.maxDeceleration, config.maxAcceleration};
+  if (!(config.maxVoltage > 0.0)) return bounds;
+  const double halfTrack = config.trackWidth * 0.5;
+  const double factors[2] = {1.0 - sample.curvature * halfTrack,
+                             1.0 + sample.curvature * halfTrack};
+  const double factorDerivatives[2] = {
+      -sample.curvatureDerivative * halfTrack,
+       sample.curvatureDerivative * halfTrack};
+  const DriveFeedforwardConstraint feeds[2] = {
+      config.leftFeedforward, config.rightFeedforward};
+  for (int side = 0; side < 2; ++side) {
+    const double wheelVelocity = speed * factors[side];
+    const double sign = wheelVelocity > 1e-9 ? 1.0
+                        : wheelVelocity < -1e-9 ? -1.0 : 0.0;
+    const double curveAcceleration = factorDerivatives[side] * speed * speed;
+    const double baseVoltage = feeds[side].staticGain * sign +
+        feeds[side].velocityGain * wheelVelocity +
+        feeds[side].accelerationGain * curveAcceleration;
+    const double coefficient = feeds[side].accelerationGain * factors[side];
+    if (std::abs(coefficient) < 1e-9) continue;
+    double low = (-config.maxVoltage - baseVoltage) / coefficient;
+    double high = (config.maxVoltage - baseVoltage) / coefficient;
+    if (low > high) std::swap(low, high);
+    bounds.minimum = std::max(bounds.minimum, low);
+    bounds.maximum = std::min(bounds.maximum, high);
+  }
+  if (bounds.minimum > bounds.maximum) {
+    // No acceleration can make this state voltage-feasible. Force the time
+    // passes toward a stop rather than emitting an impossible trajectory.
+    return {0.0, 0.0};
+  }
+  return bounds;
 }
 
 }  // namespace
@@ -106,16 +151,28 @@ Trajectory generateTrajectory(const std::vector<Waypoint>& waypoints,
   }
 
   std::vector<Sample> samples;
+  std::vector<double> tangentScales(waypoints.size(), 0.0);
+  for (std::size_t i = 0; i < waypoints.size(); ++i) {
+    if (waypoints[i].tangentScale > 0.0) {
+      tangentScales[i] = waypoints[i].tangentScale;
+    } else if (i == 0) {
+      tangentScales[i] = 1.2 * distance(waypoints[0].pose, waypoints[1].pose);
+    } else if (i + 1 == waypoints.size()) {
+      tangentScales[i] = 1.2 * distance(waypoints[i - 1].pose, waypoints[i].pose);
+    } else {
+      tangentScales[i] = 0.6 *
+          (distance(waypoints[i - 1].pose, waypoints[i].pose) +
+           distance(waypoints[i].pose, waypoints[i + 1].pose));
+    }
+  }
   double arcLength = 0.0;
   for (std::size_t segment = 0; segment + 1 < waypoints.size(); ++segment) {
     const Waypoint& start = waypoints[segment];
     const Waypoint& end = waypoints[segment + 1];
     const double chord = distance(start.pose, end.pose);
     if (chord < 1e-8) throw std::invalid_argument("adjacent waypoints overlap");
-    const double startScale = start.tangentScale > 0.0
-                                  ? start.tangentScale : chord * 1.2;
-    const double endScale = end.tangentScale > 0.0
-                                ? end.tangentScale : chord * 1.2;
+    const double startScale = tangentScales[segment];
+    const double endScale = tangentScales[segment + 1];
     const Quintic x = Quintic::connect(
         start.pose.x, std::cos(start.pose.theta) * startScale, 0.0,
         end.pose.x, std::cos(end.pose.theta) * endScale, 0.0);
@@ -134,13 +191,21 @@ Trajectory generateTrajectory(const std::vector<Waypoint>& waypoints,
       const double curvature = denom > 1e-12
                                    ? (dx * ddy - dy * ddx) / denom : 0.0;
       Sample sample{{x.value(t), y.value(t), std::atan2(dy, dx)},
-                    curvature, arcLength};
+                    curvature, 0.0, arcLength};
       if (!samples.empty()) {
         arcLength += distance(samples.back().pose, sample.pose);
         sample.distance = arcLength;
       }
       samples.push_back(sample);
     }
+  }
+
+  for (std::size_t i = 0; i < samples.size(); ++i) {
+    const std::size_t before = i == 0 ? 0 : i - 1;
+    const std::size_t after = i + 1 < samples.size() ? i + 1 : i;
+    const double ds = samples[after].distance - samples[before].distance;
+    samples[i].curvatureDerivative = ds > 1e-9
+        ? (samples[after].curvature - samples[before].curvature) / ds : 0.0;
   }
 
   std::vector<double> velocity(samples.size(), config.maxVelocity);
@@ -158,14 +223,18 @@ Trajectory generateTrajectory(const std::vector<Waypoint>& waypoints,
   velocity.front() = std::min(velocity.front(), config.startVelocity);
   for (std::size_t i = 1; i < velocity.size(); ++i) {
     const double ds = samples[i].distance - samples[i - 1].distance;
+    const double allowedAcceleration = std::max(0.0,
+        voltageAccelerationBounds(samples[i - 1], velocity[i - 1], config).maximum);
     velocity[i] = std::min(velocity[i], std::sqrt(
-        velocity[i - 1] * velocity[i - 1] + 2.0 * config.maxAcceleration * ds));
+        velocity[i - 1] * velocity[i - 1] + 2.0 * allowedAcceleration * ds));
   }
   velocity.back() = std::min(velocity.back(), config.endVelocity);
   for (std::size_t i = velocity.size() - 1; i-- > 0;) {
     const double ds = samples[i + 1].distance - samples[i].distance;
+    const double allowedDeceleration = std::max(0.0,
+        -voltageAccelerationBounds(samples[i + 1], velocity[i + 1], config).minimum);
     velocity[i] = std::min(velocity[i], std::sqrt(
-        velocity[i + 1] * velocity[i + 1] + 2.0 * config.maxDeceleration * ds));
+        velocity[i + 1] * velocity[i + 1] + 2.0 * allowedDeceleration * ds));
   }
 
   const double direction = config.reversed ? -1.0 : 1.0;

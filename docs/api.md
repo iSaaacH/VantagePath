@@ -16,6 +16,11 @@ lateral, and heading error in the robot frame. `wrapAngle`, `sinc`,
 deceleration, centripetal acceleration, wheel velocity, track width, boundary
 velocities, spatial sampling, and reverse direction.
 
+Set `maxVoltage` and the left/right `DriveFeedforwardConstraint` values to make
+time parameterization limit acceleration from predicted voltage. The planner
+includes the additional wheel acceleration caused by changing curvature. A
+zero `maxVoltage` disables this optional constraint.
+
 `generateTrajectory(waypoints, config)` validates its inputs and returns a
 `Trajectory`. Generation may allocate and should happen before a time-critical
 autonomous period. `Trajectory::sample(seconds)` uses binary search and

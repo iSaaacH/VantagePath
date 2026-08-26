@@ -15,6 +15,8 @@ Dense geometric samples receive a local speed ceiling from all constraints:
 - chassis maximum velocity;
 - differential wheel speed, using `v_left/right = v(1 +/- curvature*track/2)`;
 - centripetal acceleration, using `v <= sqrt(a_c / |curvature|)`.
+- optional left/right feedforward voltage, including the wheel acceleration
+  contributed by curvature changing along the path.
 
 A forward pass enforces acceleration and a backward pass enforces deceleration.
 This is why the follower can anticipate a turn instead of reacting after
