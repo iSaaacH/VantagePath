@@ -1,0 +1,155 @@
+#include "vantage/vantage.hpp"
+
+#include <cmath>
+#include <cstdlib>
+#include <iostream>
+#include <string>
+#include <vector>
+
+namespace {
+int failures = 0;
+
+void expect(bool condition, const std::string& message) {
+  if (!condition) {
+    std::cerr << "FAIL: " << message << '\n';
+    ++failures;
+  }
+}
+
+void near(double actual, double expected, double tolerance,
+          const std::string& message) {
+  expect(std::abs(actual - expected) <= tolerance,
+         message + " (actual=" + std::to_string(actual) + ")");
+}
+}  // namespace
+
+int main() {
+  using namespace vantage;
+
+  TrajectoryConfig config;
+  config.maxVelocity = 2.0;
+  config.maxAcceleration = 1.0;
+  config.maxDeceleration = 1.25;
+  config.maxWheelVelocity = 2.1;
+  config.trackWidth = 0.4;
+  config.sampleDistance = 0.03;
+  const Trajectory straight = generateTrajectory(
+      {{{0, 0, 0}}, {{2, 0, 0}}}, config);
+  expect(!straight.empty(), "straight trajectory generated");
+  near(straight.length(), 2.0, 0.01, "straight trajectory length");
+  near(straight.states().front().velocity, 0.0, 1e-12, "starts stopped");
+  near(straight.states().back().velocity, 0.0, 1e-12, "ends stopped");
+  for (std::size_t i = 1; i < straight.states().size(); ++i) {
+    expect(straight.states()[i].time >= straight.states()[i - 1].time,
+           "trajectory time is monotonic");
+    expect(std::abs(straight.states()[i].velocity) <= config.maxVelocity + 1e-9,
+           "trajectory respects chassis velocity");
+  }
+
+  const Trajectory curve = generateTrajectory(
+      {{{0, 0, 0}}, {{1, 1, vantage::kPi / 2.0}}}, config);
+  for (const auto& state : curve.states()) {
+    const double left = state.velocity *
+                        (1.0 - state.curvature * config.trackWidth * 0.5);
+    const double right = state.velocity *
+                         (1.0 + state.curvature * config.trackWidth * 0.5);
+    expect(std::max(std::abs(left), std::abs(right)) <=
+               config.maxWheelVelocity + 1e-8,
+           "curve respects wheel velocity");
+    expect(state.velocity * state.velocity * std::abs(state.curvature) <=
+               config.maxCentripetalAcceleration + 1e-8,
+           "curve respects centripetal acceleration");
+  }
+
+  config.reversed = true;
+  const Trajectory reverse = generateTrajectory(
+      {{{0, 0, 0}}, {{1, 0, 0}}}, config);
+  expect(reverse.states()[reverse.states().size() / 2].velocity < 0,
+         "reverse trajectory has negative velocity");
+  near(std::abs(reverse.states().front().pose.theta), vantage::kPi, 1e-9,
+       "reverse trajectory faces opposite its geometric tangent");
+
+  DifferentialDriveKinematics kinematics(0.4);
+  const WheelSpeeds wheels = kinematics.toWheelSpeeds({1.0, 2.0});
+  near(wheels.left, 0.6, 1e-12, "left inverse kinematics");
+  near(wheels.right, 1.4, 1e-12, "right inverse kinematics");
+  near(kinematics.toChassisSpeeds(wheels).angular, 2.0, 1e-12,
+       "forward kinematics round trip");
+
+  NonlinearPoseController controller;
+  TrajectoryState reference;
+  reference.pose = {1, 0.2, 0};
+  reference.velocity = 1.0;
+  const ChassisSpeeds correction = controller.calculate({0, 0, 0}, reference);
+  expect(correction.linear > 1.0, "controller corrects longitudinal lag");
+  expect(correction.angular > 0.0, "controller steers toward positive lateral error");
+
+  MotorFeedforward feedforward({0.2, 2.0, 0.5});
+  near(feedforward.calculate(1.0, 2.0), 3.2, 1e-12,
+       "feedforward combines static, velocity, acceleration");
+
+  DifferentialDriveOdometry odometry;
+  odometry.update(0, 0, 0);
+  Pose2d pose = odometry.update(1, 1, 0);
+  near(pose.x, 1.0, 1e-9, "odometry integrates forward travel");
+  near(pose.y, 0.0, 1e-9, "straight odometry has no lateral travel");
+
+  FollowerConfig followerConfig;
+  followerConfig.trackWidth = config.trackWidth;
+  followerConfig.leftFeedforward.velocityGain = 1.0;
+  followerConfig.rightFeedforward.velocityGain = 1.0;
+  followerConfig.divergenceLimit = 5.0;
+  TrajectoryFollower follower(followerConfig);
+  follower.start(straight, 0.0);
+  const FollowerOutput output = follower.update(
+      straight.duration() * 0.5, straight.sample(straight.duration() * 0.5).pose,
+      {}, 12.0);
+  expect(output.status == FollowerStatus::kRunning, "follower runs mid-path");
+  expect(output.leftVoltage > 0 && output.rightVoltage > 0,
+         "follower commands both wheels on straight path");
+
+  // End-to-end kinematic simulation with perfect wheel-speed actuators. This
+  // exercises timed sampling, nonlinear feedback, kinematics, and settling on
+  // a changing-curvature S path rather than only isolated formulas.
+  config.reversed = false;
+  config.maxVelocity = 1.2;
+  config.maxAcceleration = 1.5;
+  const Trajectory sCurve = generateTrajectory(
+      {{{0, 0, 0}}, {{0.8, 0.45, 0.2}}, {{1.6, 0, 0}}}, config);
+  followerConfig.positionTolerance = 0.04;
+  followerConfig.headingTolerance = 0.05;
+  followerConfig.velocityTolerance = 0.08;
+  followerConfig.settleCycles = 5;
+  followerConfig.timeoutAfterTrajectory = 2.0;
+  TrajectoryFollower simulatedFollower(followerConfig);
+  Pose2d simulatedPose{};
+  WheelSpeeds simulatedWheels{};
+  simulatedFollower.start(sCurve, 0.0);
+  constexpr double dt = 0.01;
+  for (double time = dt; time < sCurve.duration() + 2.0; time += dt) {
+    const FollowerOutput command = simulatedFollower.update(
+        time, simulatedPose, simulatedWheels, 12.0);
+    simulatedWheels = command.wheelSetpoint;
+    const ChassisSpeeds chassis = kinematics.toChassisSpeeds(simulatedWheels);
+    const double dtheta = chassis.angular * dt;
+    const double localX = chassis.linear * dt * sinc(dtheta);
+    const double localY = chassis.linear * dt *
+        (std::abs(dtheta) < 1e-8 ? dtheta * 0.5
+                                 : (1.0 - std::cos(dtheta)) / dtheta);
+    const double c = std::cos(simulatedPose.theta);
+    const double s = std::sin(simulatedPose.theta);
+    simulatedPose.x += c * localX - s * localY;
+    simulatedPose.y += s * localX + c * localY;
+    simulatedPose.theta = wrapAngle(simulatedPose.theta + dtheta);
+    if (simulatedFollower.status() != FollowerStatus::kRunning) break;
+  }
+  expect(simulatedFollower.status() == FollowerStatus::kSettled,
+         "S-curve simulation reaches stable settled state");
+  near(simulatedPose.x, sCurve.states().back().pose.x, 0.04,
+       "S-curve endpoint x");
+  near(simulatedPose.y, sCurve.states().back().pose.y, 0.04,
+       "S-curve endpoint y");
+
+  if (failures == 0) std::cout << "All VantagePath tests passed\n";
+  return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+}

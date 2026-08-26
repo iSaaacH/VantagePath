@@ -1,0 +1,112 @@
+#include "vantage/controller.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <stdexcept>
+
+namespace vantage {
+
+DifferentialDriveKinematics::DifferentialDriveKinematics(double trackWidth)
+    : trackWidth_(trackWidth) {
+  if (!(trackWidth > 0.0)) throw std::invalid_argument("trackWidth must be > 0");
+}
+
+WheelSpeeds DifferentialDriveKinematics::toWheelSpeeds(
+    const ChassisSpeeds& speeds) const {
+  const double delta = speeds.angular * trackWidth_ * 0.5;
+  return {speeds.linear - delta, speeds.linear + delta};
+}
+
+ChassisSpeeds DifferentialDriveKinematics::toChassisSpeeds(
+    const WheelSpeeds& speeds) const {
+  return {(speeds.left + speeds.right) * 0.5,
+          (speeds.right - speeds.left) / trackWidth_};
+}
+
+NonlinearPoseController::NonlinearPoseController(
+    NonlinearControllerConfig config)
+    : config_(config) {
+  if (!(config.convergence > 0.0) || !(config.damping > 0.0) ||
+      config.damping > 1.0 || config.minimumFeedbackSpeed < 0.0) {
+    throw std::invalid_argument("controller requires b > 0 and 0 < zeta <= 1");
+  }
+}
+
+PoseError NonlinearPoseController::error(
+    const Pose2d& current, const TrajectoryState& reference) const {
+  return errorInRobotFrame(current, reference.pose);
+}
+
+ChassisSpeeds NonlinearPoseController::calculate(
+    const Pose2d& current, const TrajectoryState& reference) const {
+  const PoseError e = error(current, reference);
+  const double vRef = reference.velocity;
+  const double wRef = reference.angularVelocity;
+  const double feedbackSpeed = std::max(std::abs(vRef),
+                                        config_.minimumFeedbackSpeed);
+  const double k = 2.0 * config_.damping *
+                   std::sqrt(wRef * wRef + config_.convergence *
+                             feedbackSpeed * feedbackSpeed);
+
+  const double linearCorrection = std::clamp(
+      k * e.longitudinal, -config_.maxLinearCorrection,
+      config_.maxLinearCorrection);
+  const double angularCorrection = std::clamp(
+      k * e.heading + config_.convergence * feedbackSpeed *
+          sinc(e.heading) * e.lateral,
+      -config_.maxAngularCorrection, config_.maxAngularCorrection);
+  return {vRef * std::cos(e.heading) + linearCorrection,
+          wRef + angularCorrection};
+}
+
+MotorFeedforward::MotorFeedforward(FeedforwardConfig config) : config_(config) {}
+
+double MotorFeedforward::calculate(double velocity, double acceleration) const {
+  double sign = 0.0;
+  if (velocity > 1e-9) sign = 1.0;
+  if (velocity < -1e-9) sign = -1.0;
+  return config_.staticGain * sign + config_.velocityGain * velocity +
+         config_.accelerationGain * acceleration;
+}
+
+VelocityPid::VelocityPid(VelocityPidConfig config) : config_(config) {}
+
+double VelocityPid::calculate(double setpoint, double measurement, double dt,
+                              double minOutput, double maxOutput) {
+  if (!(dt > 0.0)) return 0.0;
+  const double error = setpoint - measurement;
+  const double rawDerivative = initialized_
+                                   ? -(measurement - previousMeasurement_) / dt
+                                   : 0.0;
+  const double tau = std::max(0.0, config_.derivativeTimeConstant);
+  const double alpha = tau / (tau + dt);
+  filteredDerivative_ = alpha * filteredDerivative_ +
+                        (1.0 - alpha) * rawDerivative;
+
+  const double candidateIntegral = std::clamp(
+      integral_ + error * dt, -std::abs(config_.integralLimit),
+      std::abs(config_.integralLimit));
+  const auto outputFor = [&](double integral) {
+    return config_.kp * error + config_.ki * integral +
+           config_.kd * filteredDerivative_;
+  };
+  const double candidateOutput = outputFor(candidateIntegral);
+  // Conditional integration: do not accumulate farther into saturation.
+  if ((candidateOutput <= maxOutput || error < 0.0) &&
+      (candidateOutput >= minOutput || error > 0.0)) {
+    integral_ = candidateIntegral;
+  }
+
+  previousMeasurement_ = measurement;
+  initialized_ = true;
+  return std::clamp(outputFor(integral_), minOutput, maxOutput);
+}
+
+void VelocityPid::reset() {
+  integral_ = 0.0;
+  previousMeasurement_ = 0.0;
+  filteredDerivative_ = 0.0;
+  initialized_ = false;
+}
+
+}  // namespace vantage

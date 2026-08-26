@@ -1,0 +1,18 @@
+site_name: VantagePath
+site_description: Robust trajectory control for differential-drive robots
+site_url: https://isaaach.github.io/VantagePath/
+repo_url: https://github.com/iSaaacH/VantagePath
+theme:
+  name: mkdocs
+nav:
+  - Overview: index.md
+  - Architecture: architecture.md
+  - API: api.md
+  - Tuning: tuning.md
+  - LemLib comparison: lemlib-comparison.md
+  - Safety checklist: safety.md
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
