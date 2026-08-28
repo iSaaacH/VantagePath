@@ -1,0 +1,109 @@
+export const FIELD_SIZE = 144;
+export const INCH_TO_METRE = 0.0254;
+
+export function clamp(value, minimum = 0, maximum = FIELD_SIZE) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+export function wrapRadians(angle) {
+  while (angle > Math.PI) angle -= Math.PI * 2;
+  while (angle <= -Math.PI) angle += Math.PI * 2;
+  return angle;
+}
+
+export function mirrorWaypoint(point, mode) {
+  if (mode === "left-right") return { ...point, x: FIELD_SIZE - point.x, heading: wrapRadians(Math.PI - point.heading) };
+  if (mode === "bottom-top") return { ...point, y: FIELD_SIZE - point.y, heading: wrapRadians(-point.heading) };
+  if (mode === "alliance") return { ...point, x: FIELD_SIZE - point.x, y: FIELD_SIZE - point.y, heading: wrapRadians(point.heading + Math.PI) };
+  throw new Error(`Unknown mirror mode: ${mode}`);
+}
+
+export function reverseWaypoints(points) {
+  return [...points].reverse().map((point) => ({ ...point, heading: wrapRadians(point.heading + Math.PI) }));
+}
+
+export function cornerToGps(point) {
+  return {
+    ...point,
+    x: (point.x - FIELD_SIZE / 2) * INCH_TO_METRE,
+    y: (point.y - FIELD_SIZE / 2) * INCH_TO_METRE,
+    heading: wrapRadians(Math.PI / 2 - point.heading),
+    tangent: point.tangent * INCH_TO_METRE,
+  };
+}
+
+export function estimateLength(points, subdivisions = 24) {
+  let length = 0;
+  for (let segment = 0; segment + 1 < points.length; segment += 1) {
+    let previous = points[segment];
+    for (let step = 1; step <= subdivisions; step += 1) {
+      const current = quinticPoint(points[segment], points[segment + 1], step / subdivisions);
+      length += Math.hypot(current.x - previous.x, current.y - previous.y);
+      previous = current;
+    }
+  }
+  return length;
+}
+
+export function quinticPoint(start, end, t) {
+  function axis(p0, velocity0, p1, velocity1) {
+    const a3 = -10 * p0 - 6 * velocity0 + 10 * p1 - 4 * velocity1;
+    const a4 = 15 * p0 + 8 * velocity0 - 15 * p1 + 7 * velocity1;
+    const a5 = -6 * p0 - 3 * velocity0 + 6 * p1 - 3 * velocity1;
+    return p0 + t * (velocity0 + t * t * (a3 + t * (a4 + t * a5)));
+  }
+  return {
+    x: axis(start.x, Math.cos(start.heading) * start.tangent, end.x, Math.cos(end.heading) * end.tangent),
+    y: axis(start.y, Math.sin(start.heading) * start.tangent, end.y, Math.sin(end.heading) * end.tangent),
+  };
+}
+
+export function makeDocument() {
+  return {
+    version: 1,
+    type: "VantagePathDocument",
+    title: "Competition auto",
+    game: "V5RC Override 2026-27",
+    coordinateFrame: "corner-bottom-left",
+    units: "inches",
+    field: { width: FIELD_SIZE, height: FIELD_SIZE },
+    alliance: "red",
+    snap: true,
+    showZones: true,
+    paths: [{
+      id: crypto.randomUUID(), name: "Primary route", color: "#171715", reversed: false,
+      waypoints: [
+        { id: crypto.randomUUID(), x: 18, y: 18, heading: 0.18, tangent: 38 },
+        { id: crypto.randomUUID(), x: 68, y: 50, heading: 0.82, tangent: 42 },
+        { id: crypto.randomUUID(), x: 116, y: 112, heading: 1.35, tangent: 34 },
+      ],
+    }],
+  };
+}
+
+export function validateDocument(value) {
+  if (!value || value.type !== "VantagePathDocument" || value.version !== 1 || !Array.isArray(value.paths)) throw new Error("This is not a supported VantagePath file.");
+  for (const path of value.paths) {
+    if (!path.id || !Array.isArray(path.waypoints)) throw new Error("A path is missing its waypoint data.");
+    for (const point of path.waypoints) {
+      for (const key of ["x", "y", "heading", "tangent"]) if (!Number.isFinite(point[key])) throw new Error(`Waypoint ${key} must be a number.`);
+      point.x = clamp(point.x); point.y = clamp(point.y); point.tangent = Math.max(1, point.tangent);
+    }
+  }
+  return value;
+}
+
+export function cppExport(document, variableName, frame = "corner") {
+  const safeName = /^[A-Za-z_][A-Za-z0-9_]*$/.test(variableName) ? variableName : "generatedPath";
+  const blocks = document.paths.map((path, index) => {
+    const gps = frame === "gps";
+    const points = gps ? path.waypoints.map(cornerToGps) : path.waypoints;
+    const unit = frame === "gps" ? "metres / official GPS centre frame" : "inches / bottom-left corner frame";
+    const entries = points.map((point) => `    {{${point.x.toFixed(4)}, ${point.y.toFixed(4)}, ${point.heading.toFixed(6)}}, ${point.tangent.toFixed(4)}}`).join(",\n");
+    const suffix = document.paths.length === 1 ? "" : `${index + 1}`;
+    const gpsSuffix = gps ? "Gps" : "";
+    const conversion = gps ? `\nconst std::vector<vantage::Waypoint> ${safeName}${suffix} = [] {\n  auto waypoints = ${safeName}${suffix}Gps;\n  for (auto& waypoint : waypoints) {\n    waypoint.pose = vantage::vexGpsToCorner(\n        waypoint.pose, {3.6576, 3.6576});\n  }\n  return waypoints;\n}();\n` : "\n";
+    return `// ${path.name} — ${unit}\nconst std::vector<vantage::Waypoint> ${safeName}${suffix}${gpsSuffix} = {\n${entries}\n};\n${conversion}\nconst vantage::TrajectoryConfig ${safeName}${suffix}Config = [] {\n  vantage::TrajectoryConfig config;\n  config.reversed = ${path.reversed ? "true" : "false"};\n  return config;\n}();\nconst auto ${safeName}${suffix}Trajectory = vantage::generateTrajectory(${safeName}${suffix}, ${safeName}${suffix}Config);`;
+  });
+  return `// Generated by VantagePath Studio\n#include <vantage/vantage.hpp>\n#include <vector>\n\n${blocks.join("\n\n")}`;
+}

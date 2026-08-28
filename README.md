@@ -28,6 +28,8 @@ waypoints -> quintic spline -> physical constraints -> timed states
 - built-in fault-tolerant PROS `FusedDrive` and dual-IMU `FusedImu` adapters
 - settle window, timeout, cancel, saturation telemetry, and divergence abort
 - host-side tests and a documented hardware adapter boundary
+- browser-based path studio with draggable tangent controls, alliance mirrors,
+  reverse paths, `.vpath` save/open, and C++ export
 
 ## Minimal use
 
@@ -63,6 +65,20 @@ setDriveVoltage(out.leftVoltage, out.rightVoltage);
 Follow the numbered [getting-started
 tutorials](https://isaaach.github.io/VantagePath/tutorials/1-getting-started/) or
 open the [API reference](https://isaaach.github.io/VantagePath/reference/).
+
+## Path studio
+
+Open [VantagePath Studio](https://isaaach.github.io/VantagePath/studio/) on
+GitHub Pages, or launch the zero-install editor locally from the repository
+root:
+
+```sh
+python3 -m http.server 4173 --directory editor
+```
+
+Then open <http://localhost:4173>. Studio uses a bottom-left corner authoring
+origin and can export through the official centre-origin VEX GPS frame. See the
+[field coordinate reference](docs/reference/field.md) for the exact conversion.
 
 ## Build and test
 

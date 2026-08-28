@@ -27,6 +27,30 @@ void near(double actual, double expected, double tolerance,
 int main() {
   using namespace vantage;
 
+  const FieldDimensions vexField{144.0, 144.0};
+  const Pose2d gpsOrigin = cornerToVexGps({72.0, 72.0, kPi * 0.5}, vexField);
+  near(gpsOrigin.x, 0.0, 1e-12, "corner frame converts GPS centre x");
+  near(gpsOrigin.y, 0.0, 1e-12, "corner frame converts GPS centre y");
+  near(gpsOrigin.theta, 0.0, 1e-12, "corner heading converts to GPS north");
+  const Pose2d cornerRoundTrip = vexGpsToCorner(gpsOrigin, vexField);
+  near(cornerRoundTrip.x, 72.0, 1e-12, "GPS conversion round trips x");
+  near(cornerRoundTrip.y, 72.0, 1e-12, "GPS conversion round trips y");
+  near(cornerRoundTrip.theta, kPi * 0.5, 1e-12,
+       "GPS conversion round trips heading");
+  const Pose2d allianceMirror = mirrorPose(
+      {12.0, 24.0, 0.25}, FieldMirror::kAlliance180, vexField);
+  near(allianceMirror.x, 132.0, 1e-12, "alliance mirror transforms x");
+  near(allianceMirror.y, 120.0, 1e-12, "alliance mirror transforms y");
+  near(allianceMirror.theta, wrapAngle(0.25 + kPi), 1e-12,
+       "alliance mirror transforms heading");
+  const auto reordered = reverseWaypoints(
+      {{{10.0, 20.0, 0.0}, 4.0}, {{30.0, 40.0, kPi * 0.5}, 8.0}});
+  near(reordered.front().pose.x, 30.0, 1e-12, "path order reverses");
+  near(reordered.front().pose.theta, -kPi * 0.5, 1e-12,
+       "reversed path tangent faces into path");
+  near(reordered.front().tangentScale, 8.0, 1e-12,
+       "reversed path keeps tangent scale");
+
   TrajectoryConfig config;
   config.maxVelocity = 2.0;
   config.maxAcceleration = 1.0;

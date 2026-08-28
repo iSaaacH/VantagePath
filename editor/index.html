@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f1ede4" />
+    <title>VantagePath Studio</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <button class="brand" data-action="home" aria-label="VantagePath home">
+          <span class="brand-mark">VP</span><span>VantagePath / Studio</span>
+        </button>
+        <nav class="mode-nav" aria-label="Editor mode">
+          <button class="is-active" data-action="select-tool">Path editor</button>
+        </nav>
+        <div class="file-actions">
+          <button data-action="open">Open</button>
+          <button data-action="save">Save .vpath</button>
+          <button class="primary" data-action="export">Export C++ ↗</button>
+          <input id="file-input" type="file" accept=".vpath,.json,application/json" hidden />
+        </div>
+      </header>
+
+      <section class="context-strip">
+        <div><span class="section-index">V5RC Override · 2026–27 · Manual 1.1</span><strong id="document-title" contenteditable="true" spellcheck="false">Competition auto</strong></div>
+        <dl>
+          <div><dt>Origin</dt><dd>Bottom-left <span>(0, 0)</span></dd></div>
+          <div><dt>Field</dt><dd>144 × 144 <span>in</span></dd></div>
+          <div><dt>Autosave</dt><dd class="live-state"><i></i> Local</dd></div>
+        </dl>
+      </section>
+
+      <section class="editor-grid">
+        <aside class="rail path-rail">
+          <div class="rail-heading"><div><span class="section-index">01 / Routes</span><h2>Paths</h2></div><button class="square-button" data-action="new-path" aria-label="Add path">+</button></div>
+          <div id="path-list" class="path-list"></div>
+          <div class="rail-note"><span>Corner coordinate model</span><p>The canvas is authored from the bottom-left. GPS export converts to VEX’s official centre origin and compass heading.</p></div>
+        </aside>
+
+        <section class="canvas-panel">
+          <div class="canvas-toolbar">
+            <div class="tool-group" aria-label="Edit tools">
+              <button class="tool is-active" data-action="select-tool" title="Select (V)">↖ <span>Select</span></button>
+              <button class="tool" data-action="add-point" title="Add waypoint (A)">＋ <span>Point</span></button>
+              <button class="tool" data-action="delete-point" title="Delete selected">− <span>Delete</span></button>
+            </div>
+            <div class="tool-group">
+              <button data-action="undo" title="Undo">↶</button><button data-action="redo" title="Redo">↷</button>
+              <label class="compact-check"><input id="snap-toggle" type="checkbox" checked /><span>Snap 6″</span></label>
+              <label class="compact-check"><input id="zone-toggle" type="checkbox" checked /><span>Zones</span></label>
+            </div>
+          </div>
+          <div class="field-stage" id="field-stage">
+            <svg id="field" viewBox="-9 -9 162 162" role="img" aria-label="Interactive VEX Override field path editor"></svg>
+            <div class="axis axis-x">X → 144″</div><div class="axis axis-y">Y → 144″</div>
+            <div class="coordinate-readout" id="coordinate-readout">X 0.0 · Y 0.0</div>
+            <div class="canvas-help">Double-click to add · drag anchors and acid control handles · Shift bypasses snap</div>
+          </div>
+          <div class="timeline">
+            <div><span class="section-index">03 / Trajectory</span><strong id="path-summary">3 anchors · 0.0 in</strong></div>
+            <div class="speed-line"><i></i><span></span><b></b></div>
+            <label><span>Drive direction</span><select id="drive-direction"><option value="forward">Forward</option><option value="reverse">Reverse</option></select></label>
+          </div>
+        </section>
+
+        <aside class="rail inspector-rail">
+          <div class="rail-heading"><div><span class="section-index">02 / Controls</span><h2>Inspector</h2></div><span id="selection-index">P01</span></div>
+
+          <section class="inspector-section alliance-section">
+            <div class="section-label"><span>Alliance view</span><small>sets legal-side contour</small></div>
+            <div class="segmented"><button data-alliance="red" class="is-active"><i class="red-dot"></i>Red</button><button data-alliance="blue"><i class="blue-dot"></i>Blue</button><button data-alliance="skills">Skills</button></div>
+          </section>
+
+          <section class="inspector-section" id="waypoint-inspector">
+            <div class="section-label"><span>Selected waypoint</span><small id="waypoint-label">Anchor 01</small></div>
+            <div class="field-pair">
+              <label><span>X / in</span><input id="point-x" type="number" min="0" max="144" step="0.1" /></label>
+              <label><span>Y / in</span><input id="point-y" type="number" min="0" max="144" step="0.1" /></label>
+            </div>
+            <div class="field-pair">
+              <label><span>Heading / °</span><input id="point-heading" type="number" step="1" /></label>
+              <label><span>Tangent / in</span><input id="point-tangent" type="number" min="1" step="1" /></label>
+            </div>
+          </section>
+
+          <section class="inspector-section">
+            <div class="section-label"><span>Transform route</span><small>all actions are undoable</small></div>
+            <div class="action-stack">
+              <button data-action="mirror-alliance"><span>Alliance opposite</span><b>180° ↗</b></button>
+              <button data-action="mirror-left-right"><span>Mirror left / right</span><b>↔</b></button>
+              <button data-action="mirror-bottom-top"><span>Mirror bottom / top</span><b>↕</b></button>
+              <button data-action="reverse-order"><span>Reverse path order</span><b>⇄</b></button>
+            </div>
+          </section>
+
+          <section class="inspector-section export-settings">
+            <div class="section-label"><span>Code export</span><small>VantagePath C++17</small></div>
+            <label><span>Coordinate frame</span><select id="export-frame"><option value="corner">Corner origin · inches</option><option value="gps">Official VEX GPS · metres</option></select></label>
+            <label><span>Variable name</span><input id="variable-name" value="competitionAuto" pattern="[A-Za-z_][A-Za-z0-9_]*" /></label>
+          </section>
+
+          <button class="danger-action" data-action="delete-path">Delete active path</button>
+        </aside>
+      </section>
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </main>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

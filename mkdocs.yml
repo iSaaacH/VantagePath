@@ -55,6 +55,7 @@ nav:
   - Reference:
       - API Reference: reference/index.md
       - Geometry: reference/geometry.md
+      - Field Coordinates & Studio: reference/field.md
       - Trajectory: reference/trajectory.md
       - Control: reference/control.md
       - Odometry: reference/odometry.md

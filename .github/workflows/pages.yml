@@ -2,7 +2,7 @@ name: Pages
 on:
   push:
     branches: [main]
-    paths: [docs/**, mkdocs.yml, .github/workflows/pages.yml]
+    paths: [docs/**, editor/**, mkdocs.yml, .github/workflows/pages.yml]
   workflow_dispatch:
 permissions:
   contents: read
@@ -24,6 +24,8 @@ jobs:
           python-version: "3.x"
       - run: pip install mkdocs-material
       - run: mkdocs build --strict
+      - name: Add VantagePath Studio
+        run: cp -R editor site/studio
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

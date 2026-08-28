@@ -3,6 +3,7 @@ project(VantagePath VERSION 0.2.0 LANGUAGES CXX)
 
 add_library(vantagepath
   src/controller.cpp
+  src/field.cpp
   src/follower.cpp
   src/odometry.cpp
   src/sensor_fusion.cpp
