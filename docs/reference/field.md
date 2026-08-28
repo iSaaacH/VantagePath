@@ -48,3 +48,16 @@ The Override field overlay follows version 1.1 of the 2026-27 game manual's diag
 Autonomous Line, Midfield, alliance-side starting areas, Goals, Loaders, and
 Toggles. Treat the editor overlay as planning guidance; the current official
 manual remains authoritative for legality.
+
+### Field-image calibration
+
+Studio uses the same calibrated field asset as the separate
+[`iSaaacH/vex-pathing`](https://github.com/iSaaacH/vex-pathing) application. It
+is an orthographic top-down render cropped at the measured foam-floor edges and
+resized to 2048 × 2048. The square image is mapped directly onto coordinates
+`(0, 0)` through `(144, 144)` with no drawing offset or secondary scale factor.
+
+The overlay grid is generated independently at 24-inch intervals. Its seven
+lines per axis bound six field tiles and provide a standing visual calibration
+check. Goal centres in the calibrated image land within 0.37 inches of the
+expected 24-inch lattice. See Studio's `NOTICE.md` for the CC BY 4.0 attribution.

@@ -62,23 +62,18 @@ function notify(message) {
 }
 
 function fieldMarkup() {
-  const grid = Array.from({ length: 13 }, (_, index) => index * 12).map((value) => `<path class="tile-grid" d="M${value} 0V144M0 ${value}H144"/>`).join("");
+  // The field image is cropped to exactly the 144 x 144 inch foam Floor. Its
+  // edges map directly to SVG 0..144, and this independent 24-inch grid must
+  // continue to align with its six tile rows and columns.
+  const grid = Array.from({ length: 7 }, (_, index) => index * 24).map((value) => `<path class="tile-grid" d="M${value} 0V144M0 ${value}H144"/>`).join("");
   const redVisible = documentState.showZones && documentState.alliance === "red" ? "" : " zone-hidden";
   const blueVisible = documentState.showZones && documentState.alliance === "blue" ? "" : " zone-hidden";
-  const goals = [
-    [72,18,"alliance-blue"],[18,72,"alliance-red"],[126,72,"alliance-blue"],[72,126,"alliance-red"],
-    [72,72,""],[38,38,""],[106,38,""],[38,106,""],[106,106,""]
-  ].map(([x,y,kind]) => `<circle class="goal ${kind}" cx="${x}" cy="${y}" r="3.2"/>`).join("");
-  return `<defs><pattern id="tiny-grid" width="3" height="3" patternUnits="userSpaceOnUse"><path d="M3 0H0V3" fill="none" stroke="#596063" stroke-width=".12"/></pattern></defs>
-    <rect class="field-floor" width="144" height="144"/><rect width="144" height="144" fill="url(#tiny-grid)"/>${grid}
-    <polygon class="alliance-zone-red${redVisible}" points="0,0 0,144 144,144"/><polygon class="alliance-zone-blue${blueVisible}" points="0,0 144,0 144,144"/>
-    <path class="quadrant-line" d="M0 0L54 72M144 0L72 54M144 144L90 72M0 144L72 90"/>
-    <path class="auto-line" d="M0 0L54 72L72 90L144 144"/>
-    <polygon class="midfield" points="72,54 90,72 72,90 54,72"/>
-    ${goals}
-    <path class="loader" d="M58 -2h28v4H58zM58 142h28v4H58zM-2 58h4v28h-4zM142 58h4v28h-4z"/>
-    <g class="toggle"><circle cx="7" cy="36" r="1.5"/><circle cx="137" cy="36" r="1.5"/><circle cx="7" cy="108" r="1.5"/><circle cx="137" cy="108" r="1.5"/></g>
-    <rect class="gps-strip" x="1.5" y="1.5" width="141" height="141"/><rect class="field-wall" width="144" height="144"/>
+  return `<rect class="field-floor" width="144" height="144"/>
+    <image class="field-image" href="assets/override-field.webp" x="0" y="0" width="144" height="144" preserveAspectRatio="none"/>
+    ${grid}
+    <polygon class="alliance-zone-red${redVisible}" points="0,0 48,72 72,96 144,144 0,144"/>
+    <polygon class="alliance-zone-blue${blueVisible}" points="0,0 144,0 144,144 96,72 72,48"/>
+    <rect class="field-wall" width="144" height="144"/>
     <text class="anchor-label" x="2.8" y="141">0,0</text><text class="anchor-label" x="134" y="141">+X</text><text class="anchor-label" x="2.8" y="7">+Y</text>`;
 }
 

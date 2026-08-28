@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { cornerToGps, cppExport, estimateLength, makeDocument, mirrorWaypoint, reverseWaypoints } from "./model.js";
+import { FIELD_SIZE, cornerToGps, cppExport, estimateLength, makeDocument, mirrorWaypoint, reverseWaypoints } from "./model.js";
+
+assert.equal(FIELD_SIZE, 144, "the playable floor is exactly 144 inches");
+assert.deepEqual(
+  mirrorWaypoint({ x:0, y:0, heading:0, tangent:10 }, "alliance"),
+  { x:144, y:144, heading:Math.PI, tangent:10 },
+  "alliance mirroring uses the full 0..144 field bounds",
+);
 
 const centre = cornerToGps({ x:72, y:72, heading:Math.PI/2, tangent:10 });
 assert.equal(centre.x,0); assert.equal(centre.y,0); assert.ok(Math.abs(centre.heading)<1e-12);

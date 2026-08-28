@@ -28,8 +28,21 @@ straight to the [API reference](reference/index.md).
 - built-in fused drive-encoder and dual-IMU classes for PROS
 - explicit settled, timed-out, diverged, saturated, and cancelled states
 - no dependency on PROS, WPILib, an RTOS, or a particular motor vendor
+- a visual Studio with the calibrated 2026-27 Override field, exact quintic
+  previews, draggable controls, alliance mirrors, and C++ export
 
 [Begin: install VantagePath](tutorials/1-getting-started.md){ .md-button .md-button--primary }
 [Configure your drivetrain](tutorials/2-configuration.md){ .md-button }
 [Compare VantagePath with LemLib](lemlib-comparison.md){ .md-button }
 [Browse the API reference](reference/index.md){ .md-button }
+
+---
+
+## Prefer to draw the route?
+
+Open the visual editor, place waypoints directly on the correctly scaled
+144-inch Override floor, adjust the control handles, mirror the route for the
+other alliance or starting side, then download a `.vpath` file or generated
+VantagePath C++.
+
+[Open VantagePath Studio](https://isaaach.github.io/VantagePath/studio/){ .md-button .md-button--primary }

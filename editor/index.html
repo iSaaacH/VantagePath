@@ -58,6 +58,7 @@
             <div class="axis axis-x">X → 144″</div><div class="axis axis-y">Y → 144″</div>
             <div class="coordinate-readout" id="coordinate-readout">X 0.0 · Y 0.0</div>
             <div class="canvas-help">Double-click to add · drag anchors and acid control handles · Shift bypasses snap</div>
+            <div class="field-credit">Orthographic field by <a href="https://field-rendering.jerryio.com/" target="_blank" rel="noopener">Jerry Lum</a> · CC BY 4.0 · exact 144″ floor crop</div>
           </div>
           <div class="timeline">
             <div><span class="section-index">03 / Trajectory</span><strong id="path-summary">3 anchors · 0.0 in</strong></div>
@@ -86,14 +87,14 @@
             </div>
           </section>
 
-          <section class="inspector-section">
-            <div class="section-label"><span>Transform route</span><small>all actions are undoable</small></div>
-            <div class="action-stack">
-              <button data-action="mirror-alliance"><span>Alliance opposite</span><b>180° ↗</b></button>
-              <button data-action="mirror-left-right"><span>Mirror left / right</span><b>↔</b></button>
-              <button data-action="mirror-bottom-top"><span>Mirror bottom / top</span><b>↕</b></button>
-              <button data-action="reverse-order"><span>Reverse path order</span><b>⇄</b></button>
+          <section class="inspector-section mirror-section">
+            <div class="section-label"><span>Mirror path</span><small>all actions are undoable</small></div>
+            <div class="mirror-grid">
+              <button class="mirror-primary" data-action="mirror-alliance"><b>180°</b><span>Alliance</span><small>Red ↔ Blue</small></button>
+              <button data-action="mirror-left-right"><b>↔</b><span>Left / right</span><small>Across X centre</small></button>
+              <button data-action="mirror-bottom-top"><b>↕</b><span>Bottom / top</span><small>Across Y centre</small></button>
             </div>
+            <button class="reverse-order" data-action="reverse-order"><span>Reverse path order</span><b>⇄</b></button>
           </section>
 
           <section class="inspector-section export-settings">

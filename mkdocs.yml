@@ -39,6 +39,7 @@ plugins:
 nav:
   - Home:
       - Documentation Home: index.md
+      - Open VantagePath Studio: https://isaaach.github.io/VantagePath/studio/
       - About: about.md
       - Download: download.md
       - Support: support.md
