@@ -62,7 +62,11 @@
           </div>
           <div class="timeline">
             <div><span class="section-index">03 / Trajectory</span><strong id="path-summary">3 anchors · 0.0 in</strong></div>
-            <div class="speed-line"><i></i><span></span><b></b></div>
+            <div class="playback-controls">
+              <button id="play-path" class="play-button" data-action="play-path" aria-label="Play full path">▶</button>
+              <label class="scrubber-label" for="path-scrubber"><span class="visually-hidden">Path playback position</span><input id="path-scrubber" type="range" min="0" max="1000" value="0" /></label>
+              <output id="playback-time">0.0 / 0.0 s</output>
+            </div>
             <label><span>Drive direction</span><select id="drive-direction"><option value="forward">Forward</option><option value="reverse">Reverse</option></select></label>
           </div>
         </section>
@@ -71,7 +75,7 @@
           <div class="rail-heading"><div><span class="section-index">02 / Controls</span><h2>Inspector</h2></div><span id="selection-index">P01</span></div>
 
           <section class="inspector-section alliance-section">
-            <div class="section-label"><span>Alliance view</span><small>sets legal-side contour</small></div>
+            <div class="section-label"><span>Alliance view</span><small>highlights alliance quadrants</small></div>
             <div class="segmented"><button data-alliance="red" class="is-active"><i class="red-dot"></i>Red</button><button data-alliance="blue"><i class="blue-dot"></i>Blue</button><button data-alliance="skills">Skills</button></div>
           </section>
 
@@ -87,10 +91,37 @@
             </div>
           </section>
 
+          <section class="inspector-section robot-section">
+            <div class="section-label"><span>Robot setup</span><small>in · in/s · in/s²</small></div>
+            <div class="field-pair">
+              <label><span>Length / in</span><input id="robot-length" data-robot="length" type="number" min="1" max="72" step="0.1" /></label>
+              <label><span>Width / in</span><input id="robot-width" data-robot="width" type="number" min="1" max="72" step="0.1" /></label>
+            </div>
+            <div class="field-pair">
+              <label><span>Track width / in</span><input id="robot-track-width" data-robot="trackWidth" type="number" min="0.1" max="72" step="0.1" /></label>
+              <label><span>Max velocity</span><input id="robot-max-velocity" data-robot="maxVelocity" type="number" min="0.1" step="1" /></label>
+            </div>
+            <div class="field-pair">
+              <label><span>Acceleration</span><input id="robot-max-acceleration" data-robot="maxAcceleration" type="number" min="0.1" step="1" /></label>
+              <label><span>Deceleration</span><input id="robot-max-deceleration" data-robot="maxDeceleration" type="number" min="0.1" step="1" /></label>
+            </div>
+            <details class="advanced-robot">
+              <summary>Advanced constraints</summary>
+              <div class="field-pair">
+                <label><span>Wheel velocity</span><input id="robot-wheel-velocity" data-robot="maxWheelVelocity" type="number" min="0.1" step="1" /></label>
+                <label><span>Centripetal accel.</span><input id="robot-centripetal" data-robot="maxCentripetalAcceleration" type="number" min="0.1" step="1" /></label>
+              </div>
+              <div class="field-pair">
+                <label><span>Start velocity</span><input id="robot-start-velocity" data-robot="startVelocity" type="number" min="0" step="1" /></label>
+                <label><span>End velocity</span><input id="robot-end-velocity" data-robot="endVelocity" type="number" min="0" step="1" /></label>
+              </div>
+            </details>
+          </section>
+
           <section class="inspector-section mirror-section">
             <div class="section-label"><span>Mirror path</span><small>all actions are undoable</small></div>
             <div class="mirror-grid">
-              <button class="mirror-primary" data-action="mirror-alliance"><b>180°</b><span>Alliance</span><small>Red ↔ Blue</small></button>
+              <button class="mirror-primary" data-action="mirror-quadrant"><b>◩</b><span>Opposite quadrant</span><small>Same alliance · across single white line</small></button>
               <button data-action="mirror-left-right"><b>↔</b><span>Left / right</span><small>Across X centre</small></button>
               <button data-action="mirror-bottom-top"><b>↕</b><span>Bottom / top</span><small>Across Y centre</small></button>
             </div>

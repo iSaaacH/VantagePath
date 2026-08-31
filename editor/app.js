@@ -1,4 +1,4 @@
-import { FIELD_SIZE, clamp, cppExport, estimateLength, makeDocument, mirrorWaypoint, quinticPoint, reverseWaypoints, validateDocument, wrapRadians } from "./model.js";
+import { FIELD_SIZE, clamp, cppExport, estimateLength, makeDocument, mirrorWaypoint, motionProfile, profileDistance, quinticPoint, reverseWaypoints, validateDocument, wrapRadians } from "./model.js";
 
 const STORAGE_KEY = "vantagepath-studio-v1";
 const svg = document.querySelector("#field");
@@ -11,6 +11,8 @@ const pointInputs = {
   x: document.querySelector("#point-x"), y: document.querySelector("#point-y"),
   heading: document.querySelector("#point-heading"), tangent: document.querySelector("#point-tangent"),
 };
+const robotInputs = [...document.querySelectorAll("[data-robot]")];
+const scrubber = document.querySelector("#path-scrubber");
 
 let documentState = loadLocal();
 let activePathId = documentState.paths[0]?.id ?? null;
@@ -19,6 +21,7 @@ let history = [JSON.stringify(documentState)];
 let historyIndex = 0;
 let drag = null;
 let toastTimer = 0;
+let playback = { playing:false, time:0, startedAt:0, startedFrom:0, frame:0 };
 
 function activePath() { return documentState.paths.find((path) => path.id === activePathId) ?? documentState.paths[0]; }
 function selectedPoint() { return activePath()?.waypoints.find((point) => point.id === selectedPointId) ?? null; }
@@ -35,6 +38,7 @@ function persist() {
 }
 
 function commit(message) {
+  stopPlayback(true);
   const serial = JSON.stringify(documentState);
   if (history[historyIndex] !== serial) {
     history = history.slice(0, historyIndex + 1);
@@ -45,8 +49,86 @@ function commit(message) {
   if (message) notify(message);
 }
 
+function pathSamples(path, subdivisions = 50) {
+  if (!path?.waypoints.length) return [];
+  const samples = [{ x:path.waypoints[0].x, y:path.waypoints[0].y, distance:0, heading:path.waypoints[0].heading }];
+  let distance = 0;
+  for (let index = 0; index + 1 < path.waypoints.length; index += 1) {
+    let previous = samples.at(-1);
+    for (let step = 1; step <= subdivisions; step += 1) {
+      const point = quinticPoint(path.waypoints[index], path.waypoints[index + 1], step / subdivisions);
+      const segment = Math.hypot(point.x - previous.x, point.y - previous.y);
+      distance += segment;
+      const heading = segment > 1e-6 ? Math.atan2(point.y - previous.y, point.x - previous.x) : previous.heading;
+      const sample = { ...point, distance, heading };
+      samples.push(sample); previous = sample;
+    }
+  }
+  return samples;
+}
+
+function playbackData() {
+  const samples = pathSamples(activePath());
+  return { samples, profile:motionProfile(samples.at(-1)?.distance ?? 0, documentState.robot) };
+}
+
+function poseAtDistance(samples, distance, reversed = false) {
+  if (!samples.length) return null;
+  let upperIndex = samples.findIndex((sample) => sample.distance >= distance);
+  if (upperIndex < 0) upperIndex = samples.length - 1;
+  const upper = samples[upperIndex];
+  const lower = samples[Math.max(0, upperIndex - 1)];
+  const span = upper.distance - lower.distance;
+  const ratio = span > 1e-6 ? (distance - lower.distance) / span : 0;
+  let heading = upper.heading;
+  if (upperIndex === samples.length - 1) heading = activePath()?.waypoints.at(-1)?.heading ?? heading;
+  if (reversed) heading = wrapRadians(heading + Math.PI);
+  return { x:lower.x + (upper.x - lower.x) * ratio, y:lower.y + (upper.y - lower.y) * ratio, heading };
+}
+
+function updatePlaybackUi() {
+  const { samples, profile } = playbackData();
+  playback.time = Math.min(playback.time, profile.duration);
+  const progress = profile.duration > 0 ? playback.time / profile.duration : 0;
+  scrubber.value = String(Math.round(progress * 1000));
+  document.querySelector("#playback-time").textContent = `${playback.time.toFixed(1)} / ${profile.duration.toFixed(1)} s`;
+  const button = document.querySelector("#play-path");
+  button.textContent = playback.playing ? "❚❚" : "▶";
+  button.setAttribute("aria-label", playback.playing ? "Pause path" : "Play full path");
+  const pose = poseAtDistance(samples, profileDistance(profile, playback.time), activePath()?.reversed);
+  const robot = document.querySelector("#playback-robot");
+  if (pose && robot) robot.setAttribute("transform", `translate(${pose.x} ${FIELD_SIZE - pose.y}) rotate(${-pose.heading * 180 / Math.PI})`);
+}
+
+function stopPlayback(reset = false) {
+  if (playback.frame) cancelAnimationFrame(playback.frame);
+  playback.frame = 0; playback.playing = false;
+  if (reset) playback.time = 0;
+  if (document.querySelector("#play-path")) updatePlaybackUi();
+}
+
+function playbackFrame(now) {
+  if (!playback.playing) return;
+  const duration = playbackData().profile.duration;
+  playback.time = Math.min(duration, playback.startedFrom + (now - playback.startedAt) / 1000);
+  if (playback.time >= duration) playback.playing = false;
+  updatePlaybackUi();
+  if (playback.playing) playback.frame = requestAnimationFrame(playbackFrame);
+  else playback.frame = 0;
+}
+
+function togglePlayback() {
+  const duration = playbackData().profile.duration;
+  if (!(duration > 0)) return notify("Add at least two waypoints to play the path");
+  if (playback.playing) return stopPlayback(false);
+  if (playback.time >= duration) playback.time = 0;
+  playback.playing = true; playback.startedAt = performance.now(); playback.startedFrom = playback.time;
+  updatePlaybackUi(); playback.frame = requestAnimationFrame(playbackFrame);
+}
+
 function restore(index) {
   if (index < 0 || index >= history.length) return;
+  stopPlayback(true);
   historyIndex = index;
   documentState = JSON.parse(history[index]);
   if (!documentState.paths.some((path) => path.id === activePathId)) activePathId = documentState.paths[0]?.id ?? null;
@@ -92,11 +174,15 @@ function pathMarkup(path) {
     const selected = point.id === selectedPointId;
     return `<g><line class="control-line" x1="${point.x}" y1="${FIELD_SIZE - point.y}" x2="${handleX}" y2="${FIELD_SIZE - handleY}"/>
       <circle class="handle" data-handle-id="${point.id}" cx="${handleX}" cy="${FIELD_SIZE - handleY}" r="2"/>
-      ${index === 0 ? `<rect class="robot-box" x="${point.x - 9}" y="${FIELD_SIZE - point.y - 9}" width="18" height="18" transform="rotate(${-point.heading * 180 / Math.PI} ${point.x} ${FIELD_SIZE - point.y})"/>` : ""}
       <circle class="anchor ${selected ? "selected" : ""}" data-point-id="${point.id}" cx="${point.x}" cy="${FIELD_SIZE - point.y}" r="2.8"/>
       <text class="anchor-label" x="${point.x + 3.8}" y="${FIELD_SIZE - point.y - 3}">${String(index + 1).padStart(2,"0")}</text></g>`;
   }).join("");
-  return `${d ? `<path class="path-shadow" d="${d}"/><path class="path-curve ${path.reversed ? "reversed" : ""}" d="${d}"/>` : ""}${controls}`;
+  const robot = documentState.robot;
+  const robotMarkup = `<g id="playback-robot" transform="translate(${path.waypoints[0].x} ${FIELD_SIZE - path.waypoints[0].y}) rotate(${-(path.waypoints[0].heading + (path.reversed ? Math.PI : 0)) * 180 / Math.PI})">
+    <rect class="robot-box" x="${-robot.length / 2}" y="${-robot.width / 2}" width="${robot.length}" height="${robot.width}" rx="1"/>
+    <line class="robot-nose" x1="${robot.length * .12}" y1="0" x2="${robot.length * .43}" y2="0"/>
+  </g>`;
+  return `${d ? `<path class="path-shadow" d="${d}"/><path class="path-curve ${path.reversed ? "reversed" : ""}" d="${d}"/>` : ""}${controls}${robotMarkup}`;
 }
 
 function render() {
@@ -118,9 +204,11 @@ function render() {
   document.querySelector("#drive-direction").value = path?.reversed ? "reverse" : "forward";
   document.querySelector("#snap-toggle").checked = documentState.snap;
   document.querySelector("#zone-toggle").checked = documentState.showZones;
+  robotInputs.forEach((input) => { input.value = Number(documentState.robot[input.dataset.robot]).toFixed(1); });
   document.querySelectorAll("[data-alliance]").forEach((button) => button.classList.toggle("is-active", button.dataset.alliance === documentState.alliance));
   document.querySelector('[data-action="undo"]').disabled = historyIndex === 0;
   document.querySelector('[data-action="redo"]').disabled = historyIndex === history.length - 1;
+  updatePlaybackUi();
 }
 
 function svgCoordinates(event) {
@@ -151,7 +239,7 @@ function deletePoint() {
 function transformPath(mode) {
   const path = activePath(); if (!path) return;
   path.waypoints = path.waypoints.map((point) => mirrorWaypoint(point, mode));
-  commit(mode === "alliance" ? "Moved to opposite alliance side" : "Path mirrored");
+  commit(mode === "quadrant" ? "Mirrored to the opposite same-alliance quadrant" : "Path mirrored");
 }
 
 function newPath() {
@@ -177,10 +265,11 @@ function runAction(action) {
   if (action === "delete-point") return deletePoint();
   if (action === "undo") return restore(historyIndex - 1);
   if (action === "redo") return restore(historyIndex + 1);
-  if (action === "mirror-alliance") return transformPath("alliance");
+  if (action === "mirror-quadrant") return transformPath("quadrant");
   if (action === "mirror-left-right") return transformPath("left-right");
   if (action === "mirror-bottom-top") return transformPath("bottom-top");
   if (action === "reverse-order") { const path=activePath(); if(path){path.waypoints=reverseWaypoints(path.waypoints);commit("Path order reversed");} return; }
+  if (action === "play-path") return togglePlayback();
   if (action === "delete-path") {
     if (!activePath()) return;
     documentState.paths = documentState.paths.filter((path) => path.id !== activePathId);
@@ -201,7 +290,7 @@ document.addEventListener("click", (event) => {
   const action = event.target.closest("[data-action]")?.dataset.action;
   if (action) runAction(action);
   const pathButton = event.target.closest("[data-path-id]");
-  if (pathButton) { activePathId = pathButton.dataset.pathId; selectedPointId = activePath()?.waypoints[0]?.id ?? null; render(); }
+  if (pathButton) { stopPlayback(true); activePathId = pathButton.dataset.pathId; selectedPointId = activePath()?.waypoints[0]?.id ?? null; render(); }
   const alliance = event.target.closest("[data-alliance]")?.dataset.alliance;
   if (alliance) { documentState.alliance = alliance; commit(`${alliance[0].toUpperCase()+alliance.slice(1)} field view selected`); }
 });
@@ -210,6 +299,7 @@ svg.addEventListener("pointerdown", (event) => {
   const pointId = event.target.dataset.pointId;
   const handleId = event.target.dataset.handleId;
   if (!pointId && !handleId) return;
+  stopPlayback(true);
   selectedPointId = pointId ?? handleId;
   drag = { type:pointId ? "point" : "handle", pointId:selectedPointId, pointerId:event.pointerId };
   svg.setPointerCapture(event.pointerId); render(); event.preventDefault();
@@ -236,6 +326,20 @@ for (const [key,input] of Object.entries(pointInputs)) input.addEventListener("c
   else if(key === "tangent") point.tangent=Math.max(1,value);
   else point[key]=clamp(value);
   commit("Waypoint values updated");
+});
+
+robotInputs.forEach((input) => input.addEventListener("change", () => {
+  const value = Number(input.value);
+  if (!Number.isFinite(value)) return render();
+  documentState.robot[input.dataset.robot] = value;
+  validateDocument(documentState);
+  commit("Robot setup updated");
+}));
+
+scrubber.addEventListener("input", () => {
+  stopPlayback(false);
+  playback.time = playbackData().profile.duration * Number(scrubber.value) / 1000;
+  updatePlaybackUi();
 });
 
 document.querySelector("#snap-toggle").addEventListener("change", (event) => { documentState.snap=event.target.checked;commit(); });
