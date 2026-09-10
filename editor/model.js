@@ -135,6 +135,7 @@ export function validateDocument(value) {
   if (!value || value.type !== "VantagePathDocument" || value.version !== 1 || !Array.isArray(value.paths)) throw new Error("This is not a supported VantagePath file.");
   for (const path of value.paths) {
     if (!path.id || !Array.isArray(path.waypoints)) throw new Error("A path is missing its waypoint data.");
+    path.reversed = path.reversed === true;
     for (const point of path.waypoints) {
       for (const key of ["x", "y", "heading", "tangent"]) if (!Number.isFinite(point[key])) throw new Error(`Waypoint ${key} must be a number.`);
       point.x = clamp(point.x); point.y = clamp(point.y); point.tangent = Math.max(1, point.tangent);

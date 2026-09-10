@@ -5,6 +5,7 @@ const svg = document.querySelector("#field");
 const stage = document.querySelector("#field-stage");
 const fileInput = document.querySelector("#file-input");
 const pathList = document.querySelector("#path-list");
+const waypointList = document.querySelector("#waypoint-list");
 const toast = document.querySelector("#toast");
 const titleNode = document.querySelector("#document-title");
 const pointInputs = {
@@ -189,7 +190,10 @@ function render() {
   const path = activePath();
   svg.innerHTML = fieldMarkup() + pathMarkup(path);
   titleNode.textContent = documentState.title;
-  pathList.innerHTML = documentState.paths.map((item, index) => `<button class="path-item ${item.id === activePathId ? "is-active" : ""}" data-path-id="${item.id}"><i class="path-swatch" style="background:${escapeHtml(item.color)}"></i><span><strong>${escapeHtml(item.name)}</strong><small>${item.waypoints.length} anchors · ${item.reversed ? "reverse drive" : "forward"}</small></span><b>${String(index + 1).padStart(2,"0")}</b></button>`).join("");
+  pathList.innerHTML = documentState.paths.map((item, index) => `<div class="path-item ${item.id === activePathId ? "is-active" : ""}">
+    <button class="path-select" data-path-id="${item.id}" aria-label="Edit ${escapeHtml(item.name)}"><i class="path-swatch" style="background:${escapeHtml(item.color)}"></i><span><strong>${escapeHtml(item.name)}</strong><small>${item.waypoints.length} anchors</small></span><b>${String(index + 1).padStart(2,"0")}</b></button>
+    <button class="path-direction-toggle ${item.reversed ? "is-reversed" : ""}" data-reverse-path-id="${item.id}" aria-pressed="${item.reversed}" title="Set ${escapeHtml(item.name)} drive direction"><span>${item.reversed ? "Reverse" : "Forward"}</span><b>⇄</b></button>
+  </div>`).join("");
   const point = selectedPoint();
   document.querySelector("#waypoint-inspector").style.opacity = point ? "1" : ".4";
   Object.values(pointInputs).forEach((input) => { input.disabled = !point; });
@@ -200,6 +204,12 @@ function render() {
     document.querySelector("#waypoint-label").textContent = `Anchor ${String(index + 1).padStart(2,"0")}`;
     document.querySelector("#selection-index").textContent = `P${String(index + 1).padStart(2,"0")}`;
   }
+  document.querySelector("#waypoint-count").textContent = `${path?.waypoints.length ?? 0} ${(path?.waypoints.length ?? 0) === 1 ? "point" : "points"}`;
+  waypointList.innerHTML = (path?.waypoints ?? []).map((item, index) => `<div class="waypoint-row ${item.id === selectedPointId ? "is-selected" : ""}">
+    <button class="waypoint-select" data-select-point-id="${item.id}" aria-label="Select anchor ${index + 1}">P${String(index + 1).padStart(2,"0")}</button>
+    <label><span class="visually-hidden">Anchor ${index + 1} X coordinate in inches</span><input data-coordinate-point-id="${item.id}" data-coordinate="x" type="number" min="0" max="144" step="0.1" value="${item.x.toFixed(1)}" /></label>
+    <label><span class="visually-hidden">Anchor ${index + 1} Y coordinate in inches</span><input data-coordinate-point-id="${item.id}" data-coordinate="y" type="number" min="0" max="144" step="0.1" value="${item.y.toFixed(1)}" /></label>
+  </div>`).join("");
   document.querySelector("#path-summary").textContent = `${path?.waypoints.length ?? 0} anchors · ${estimateLength(path?.waypoints ?? []).toFixed(1)} in`;
   document.querySelector("#drive-direction").value = path?.reversed ? "reverse" : "forward";
   document.querySelector("#snap-toggle").checked = documentState.snap;
@@ -291,8 +301,26 @@ document.addEventListener("click", (event) => {
   if (action) runAction(action);
   const pathButton = event.target.closest("[data-path-id]");
   if (pathButton) { stopPlayback(true); activePathId = pathButton.dataset.pathId; selectedPointId = activePath()?.waypoints[0]?.id ?? null; render(); }
+  const reverseButton = event.target.closest("[data-reverse-path-id]");
+  if (reverseButton) {
+    const path = documentState.paths.find((item) => item.id === reverseButton.dataset.reversePathId);
+    if (path) { path.reversed = !path.reversed; commit(`${path.name} set to ${path.reversed ? "reverse" : "forward"} drive`); }
+  }
+  const pointButton = event.target.closest("[data-select-point-id]");
+  if (pointButton) { selectedPointId = pointButton.dataset.selectPointId; stopPlayback(true); render(); }
   const alliance = event.target.closest("[data-alliance]")?.dataset.alliance;
   if (alliance) { documentState.alliance = alliance; commit(`${alliance[0].toUpperCase()+alliance.slice(1)} field view selected`); }
+});
+
+waypointList.addEventListener("change", (event) => {
+  const input = event.target.closest("[data-coordinate-point-id]");
+  if (!input) return;
+  const point = activePath()?.waypoints.find((item) => item.id === input.dataset.coordinatePointId);
+  const value = Number(input.value);
+  if (!point || !Number.isFinite(value)) return render();
+  point[input.dataset.coordinate] = clamp(value);
+  selectedPointId = point.id;
+  commit("Waypoint coordinates updated");
 });
 
 svg.addEventListener("pointerdown", (event) => {
