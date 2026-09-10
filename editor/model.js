@@ -72,12 +72,12 @@ export function cornerToGps(point) {
   };
 }
 
-export function estimateLength(points, subdivisions = 24) {
+export function estimateLength(points, subdivisions = 24, segmentReversed = []) {
   let length = 0;
   for (let segment = 0; segment + 1 < points.length; segment += 1) {
     let previous = points[segment];
     for (let step = 1; step <= subdivisions; step += 1) {
-      const current = quinticPoint(points[segment], points[segment + 1], step / subdivisions);
+      const current = quinticPoint(points[segment], points[segment + 1], step / subdivisions, segmentReversed[segment] === true);
       length += Math.hypot(current.x - previous.x, current.y - previous.y);
       previous = current;
     }
@@ -118,7 +118,12 @@ export function profileDistance(profile, time) {
   return Math.min(profile.length, profile.accelerateDistance + profile.cruiseDistance + profile.peak * brakingTime - profile.deceleration * brakingTime * brakingTime / 2);
 }
 
-export function quinticPoint(start, end, t) {
+export function quinticPoint(start, end, t, reversed = false) {
+  // Waypoint heading is the robot's nose direction. A reversed segment drives
+  // that same nose backwards, so the geometric spline tangent points 180° from
+  // the heading. Flipping both endpoint tangents makes the curve back out of a
+  // waypoint (a cusp) instead of looping the robot around to face its travel.
+  const flip = reversed ? -1 : 1;
   function axis(p0, velocity0, p1, velocity1) {
     const a3 = -10 * p0 - 6 * velocity0 + 10 * p1 - 4 * velocity1;
     const a4 = 15 * p0 + 8 * velocity0 - 15 * p1 + 7 * velocity1;
@@ -126,8 +131,8 @@ export function quinticPoint(start, end, t) {
     return p0 + t * (velocity0 + t * t * (a3 + t * (a4 + t * a5)));
   }
   return {
-    x: axis(start.x, Math.cos(start.heading) * start.tangent, end.x, Math.cos(end.heading) * end.tangent),
-    y: axis(start.y, Math.sin(start.heading) * start.tangent, end.y, Math.sin(end.heading) * end.tangent),
+    x: axis(start.x, flip * Math.cos(start.heading) * start.tangent, end.x, flip * Math.cos(end.heading) * end.tangent),
+    y: axis(start.y, flip * Math.sin(start.heading) * start.tangent, end.y, flip * Math.sin(end.heading) * end.tangent),
   };
 }
 
@@ -186,7 +191,15 @@ export function cppExport(document, variableName, frame = "corner") {
     const trajectoryNames = [];
     const runBlocks = runs.map((run, runIndex) => {
       const gps = frame === "gps";
-      const points = gps ? run.waypoints.map(cornerToGps) : run.waypoints;
+      // The C++ generator treats each waypoint heading as a forward tangent and
+      // only flips facing/velocity for config.reversed. To make a reversed run
+      // back out along the intended curve (instead of demanding a 180° spin at
+      // the direction change), rotate its authored nose headings by π here; the
+      // config.reversed flag below then restores the true facing.
+      const oriented = run.reversed
+        ? run.waypoints.map((point) => ({ ...point, heading: wrapRadians(point.heading + Math.PI) }))
+        : run.waypoints;
+      const points = gps ? oriented.map(cornerToGps) : oriented;
       const unit = gps ? "metres / official GPS centre frame" : "inches / bottom-left corner frame";
       const runSuffix = runs.length === 1 ? "" : `Segment${runIndex + 1}`;
       const name = `${safeName}${routeSuffix}${runSuffix}`;

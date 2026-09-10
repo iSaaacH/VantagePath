@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { FIELD_SIZE, cornerToGps, cppExport, directionRuns, estimateLength, makeDocument, mirrorWaypoint, motionProfile, profileDistance, reverseWaypoints, validateDocument } from "./model.js";
+import { FIELD_SIZE, cornerToGps, cppExport, directionRuns, estimateLength, makeDocument, mirrorWaypoint, motionProfile, profileDistance, quinticPoint, reverseWaypoints, validateDocument, wrapRadians } from "./model.js";
 
 assert.equal(FIELD_SIZE, 144, "the playable floor is exactly 144 inches");
 assert.deepEqual(
@@ -29,6 +29,25 @@ const mixedExport = cppExport(document,"competitionAuto","corner");
 assert.match(mixedExport,/competitionAutoSegment1Config[\s\S]*config\.reversed = false/);
 assert.match(mixedExport,/competitionAutoSegment2Config[\s\S]*config\.reversed = true/);
 assert.match(mixedExport,/competitionAutoTrajectories/, "mixed direction sections are exported in execution order");
+// A reversed segment must back out of a waypoint: with the nose pointing "up"
+// (heading = +y) toward a goal above it, driving in reverse to a point below
+// should trace downward, not loop up-and-around.
+const goal = { x:72, y:96, heading:Math.PI / 2, tangent:24 };
+const behind = { x:72, y:48, heading:Math.PI / 2, tangent:24 };
+const forwardStep = quinticPoint(goal, behind, 0.1, false);
+const reverseStep = quinticPoint(goal, behind, 0.1, true);
+assert.ok(forwardStep.y > goal.y, "forward tangent leaves the goal along the nose direction");
+assert.ok(reverseStep.y < goal.y, "reversed tangent backs out opposite the nose direction");
+
+// A reversed export run rotates its authored nose headings by π so the forward
+// geometry the C++ generator builds becomes the intended back-out curve.
+const reverseDoc = makeDocument();
+reverseDoc.paths[0].segmentReversed = [false, true];
+const reverseExport = cppExport(reverseDoc, "competitionAuto", "corner");
+const flippedHeading = wrapRadians(reverseDoc.paths[0].waypoints[2].heading + Math.PI).toFixed(6);
+assert.match(reverseExport, new RegExp(`${flippedHeading}}`), "reversed run emits π-rotated headings");
+assert.match(reverseExport, /Segment2[\s\S]*config\.reversed = true/, "reversed run still flags config.reversed");
+
 const profile = motionProfile(120, document.robot);
 assert.ok(profile.duration > 0); assert.equal(profileDistance(profile, profile.duration), 120);
 const legacy = makeDocument(); delete legacy.robot; delete legacy.paths[0].segmentReversed; legacy.paths[0].reversed = true;

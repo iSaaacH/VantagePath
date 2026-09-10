@@ -53,12 +53,13 @@ function commit(message) {
 
 function pathSamples(path, subdivisions = 50) {
   if (!path?.waypoints.length) return [];
+  normalizeSegmentDirections(path);
   const samples = [{ x:path.waypoints[0].x, y:path.waypoints[0].y, distance:0, heading:path.waypoints[0].heading, segmentIndex:0 }];
   let distance = 0;
   for (let index = 0; index + 1 < path.waypoints.length; index += 1) {
     let previous = samples.at(-1);
     for (let step = 1; step <= subdivisions; step += 1) {
-      const point = quinticPoint(path.waypoints[index], path.waypoints[index + 1], step / subdivisions);
+      const point = quinticPoint(path.waypoints[index], path.waypoints[index + 1], step / subdivisions, path.segmentReversed[index]);
       const segment = Math.hypot(point.x - previous.x, point.y - previous.y);
       distance += segment;
       const heading = segment > 1e-6 ? Math.atan2(point.y - previous.y, point.x - previous.x) : previous.heading;
@@ -82,9 +83,14 @@ function poseAtDistance(samples, distance, path) {
   const lower = samples[Math.max(0, upperIndex - 1)];
   const span = upper.distance - lower.distance;
   const ratio = span > 1e-6 ? (distance - lower.distance) / span : 0;
+  const waypoints = path?.waypoints ?? [];
+  // The nose follows the direction of travel, flipped 180° on reversed segments
+  // (the robot backs along the curve). At the exact anchors the authored nose
+  // wins so the display never snaps at a forward/reverse cusp.
   let heading = upper.heading;
-  if (upperIndex === samples.length - 1) heading = activePath()?.waypoints.at(-1)?.heading ?? heading;
   if (path?.segmentReversed?.[upper.segmentIndex]) heading = wrapRadians(heading + Math.PI);
+  if (upperIndex <= 0) heading = waypoints[0]?.heading ?? heading;
+  else if (upperIndex === samples.length - 1) heading = waypoints.at(-1)?.heading ?? heading;
   return { x:lower.x + (upper.x - lower.x) * ratio, y:lower.y + (upper.y - lower.y) * ratio, heading };
 }
 
@@ -168,7 +174,7 @@ function pathMarkup(path) {
   for (let index = 0; index + 1 < path.waypoints.length; index += 1) {
     let d = `M${path.waypoints[index].x} ${FIELD_SIZE - path.waypoints[index].y}`;
     for (let step = 1; step <= 30; step += 1) {
-      const sample = quinticPoint(path.waypoints[index], path.waypoints[index + 1], step / 30);
+      const sample = quinticPoint(path.waypoints[index], path.waypoints[index + 1], step / 30, path.segmentReversed[index]);
       d += ` L${sample.x} ${FIELD_SIZE - sample.y}`;
     }
     curves.push(`<path class="path-shadow" d="${d}"/><path class="path-curve ${path.segmentReversed[index] ? "reversed" : ""}" d="${d}"/>`);
@@ -183,7 +189,7 @@ function pathMarkup(path) {
       <text class="anchor-label" x="${point.x + 3.8}" y="${FIELD_SIZE - point.y - 3}">${String(index + 1).padStart(2,"0")}</text></g>`;
   }).join("");
   const robot = documentState.robot;
-  const robotMarkup = `<g id="playback-robot" transform="translate(${path.waypoints[0].x} ${FIELD_SIZE - path.waypoints[0].y}) rotate(${-(path.waypoints[0].heading + (path.segmentReversed[0] ? Math.PI : 0)) * 180 / Math.PI})">
+  const robotMarkup = `<g id="playback-robot" transform="translate(${path.waypoints[0].x} ${FIELD_SIZE - path.waypoints[0].y}) rotate(${-path.waypoints[0].heading * 180 / Math.PI})">
     <rect class="robot-box" x="${-robot.length / 2}" y="${-robot.width / 2}" width="${robot.length}" height="${robot.width}" rx="1"/>
     <line class="robot-nose" x1="${robot.length * .12}" y1="0" x2="${robot.length * .43}" y2="0"/>
   </g>`;
@@ -217,7 +223,7 @@ function render() {
   segmentList.innerHTML = (path?.segmentReversed ?? []).map((reversed, index) => `<button class="segment-direction ${reversed ? "is-reversed" : ""}" data-segment-index="${index}" aria-pressed="${reversed}">
     <span><b>P${String(index + 1).padStart(2,"0")} → P${String(index + 2).padStart(2,"0")}</b><small>Segment ${String(index + 1).padStart(2,"0")}</small></span><strong>${reversed ? "Reverse" : "Forward"}</strong>
   </button>`).join("");
-  document.querySelector("#path-summary").textContent = `${path?.waypoints.length ?? 0} anchors · ${estimateLength(path?.waypoints ?? []).toFixed(1)} in`;
+  document.querySelector("#path-summary").textContent = `${path?.waypoints.length ?? 0} anchors · ${estimateLength(path?.waypoints ?? [], 24, path?.segmentReversed ?? []).toFixed(1)} in`;
   const directions = path?.segmentReversed ?? [];
   document.querySelector("#direction-summary").textContent = directions.some(Boolean) ? (directions.every(Boolean) ? "All reverse" : "Mixed") : "All forward";
   document.querySelector("#snap-toggle").checked = documentState.snap;
