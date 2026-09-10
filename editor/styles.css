@@ -44,9 +44,7 @@ button:disabled { cursor:not-allowed; opacity:.35; }
 .path-item strong { display:block; font-size:13px; }
 .path-item small { color:var(--muted); display:block; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px; margin-top:5px; text-transform:uppercase; }
 .path-select>b { color:var(--muted); font-size:14px; }
-.path-direction-toggle { align-items:center; background:transparent; border:0; border-top:1px solid var(--line); display:flex; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px; justify-content:space-between; margin:0 20px; padding:8px 0 10px; text-transform:uppercase; width:calc(100% - 40px); }
-.path-direction-toggle:hover { color:var(--blue); }
-.path-direction-toggle.is-reversed { color:var(--blue); font-weight:750; }
+.path-direction-status { align-items:center; border-top:1px solid var(--line); color:var(--muted); display:flex; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px; justify-content:space-between; margin:0 20px; padding:8px 0 10px; text-transform:uppercase; }
 .rail-note { border-top:1px solid var(--ink); padding:19px 20px; }
 .rail-note p { color:var(--muted); font-size:11px; line-height:1.45; margin:12px 0 0; }
 .canvas-panel { display:grid; grid-template-rows:51px minmax(420px,calc(100dvh - 311px)) 84px; min-width:0; }
@@ -74,7 +72,8 @@ button:disabled { cursor:not-allowed; opacity:.35; }
 #path-scrubber { accent-color:var(--ink); cursor:pointer; margin:0; width:100%; }
 #playback-time { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px; text-align:right; }
 .visually-hidden { clip:rect(0 0 0 0); clip-path:inset(50%); height:1px; overflow:hidden; position:absolute; white-space:nowrap; width:1px; }
-.timeline label,.export-settings label { display:flex; flex-direction:column; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px; gap:7px; text-transform:uppercase; }
+.timeline label,.export-settings label,.direction-summary { display:flex; flex-direction:column; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px; gap:7px; text-transform:uppercase; }
+.direction-summary strong { color:var(--blue); font-size:10px; }
 .timeline select,.export-settings select,.export-settings input { background:transparent; border:0; border-bottom:1px solid var(--ink); font-size:11px; min-height:26px; padding:0; }
 .inspector-section { border-bottom:1px solid var(--ink); padding:18px 20px; }
 .section-label { align-items:center; display:flex; justify-content:space-between; }
@@ -96,6 +95,15 @@ button:disabled { cursor:not-allowed; opacity:.35; }
 .waypoint-select { background:transparent; border:0; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:9px; font-weight:700; padding:7px 0; text-align:left; }
 .waypoint-select:hover { color:var(--blue); }
 .waypoint-row input { background:rgba(241,237,228,.7); border:1px solid var(--line); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; min-width:0; padding:6px; width:100%; }
+.segment-list { display:grid; gap:7px; margin-top:15px; }
+.segment-direction { align-items:center; background:transparent; border:1px solid var(--ink); display:flex; justify-content:space-between; min-height:48px; padding:9px 11px; text-align:left; }
+.segment-direction:hover { background:var(--paper-2); }
+.segment-direction.is-reversed { background:var(--ink); color:var(--paper); }
+.segment-direction span { display:flex; flex-direction:column; gap:4px; }
+.segment-direction b { font-size:10px; }
+.segment-direction small { color:var(--muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:7px; text-transform:uppercase; }
+.segment-direction.is-reversed small { color:var(--paper-2); }
+.segment-direction strong { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:9px; text-transform:uppercase; }
 .robot-section { background:rgba(217,255,72,.08); }
 .advanced-robot { margin-top:16px; }
 .advanced-robot summary { cursor:pointer; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px; text-transform:uppercase; }

@@ -1,4 +1,4 @@
-import { FIELD_SIZE, clamp, cppExport, estimateLength, makeDocument, mirrorWaypoint, motionProfile, profileDistance, quinticPoint, reverseWaypoints, validateDocument, wrapRadians } from "./model.js";
+import { FIELD_SIZE, clamp, cppExport, estimateLength, makeDocument, mirrorWaypoint, motionProfile, normalizeSegmentDirections, profileDistance, quinticPoint, reverseWaypoints, validateDocument, wrapRadians } from "./model.js";
 
 const STORAGE_KEY = "vantagepath-studio-v1";
 const svg = document.querySelector("#field");
@@ -6,6 +6,7 @@ const stage = document.querySelector("#field-stage");
 const fileInput = document.querySelector("#file-input");
 const pathList = document.querySelector("#path-list");
 const waypointList = document.querySelector("#waypoint-list");
+const segmentList = document.querySelector("#segment-list");
 const toast = document.querySelector("#toast");
 const titleNode = document.querySelector("#document-title");
 const pointInputs = {
@@ -52,7 +53,7 @@ function commit(message) {
 
 function pathSamples(path, subdivisions = 50) {
   if (!path?.waypoints.length) return [];
-  const samples = [{ x:path.waypoints[0].x, y:path.waypoints[0].y, distance:0, heading:path.waypoints[0].heading }];
+  const samples = [{ x:path.waypoints[0].x, y:path.waypoints[0].y, distance:0, heading:path.waypoints[0].heading, segmentIndex:0 }];
   let distance = 0;
   for (let index = 0; index + 1 < path.waypoints.length; index += 1) {
     let previous = samples.at(-1);
@@ -61,7 +62,7 @@ function pathSamples(path, subdivisions = 50) {
       const segment = Math.hypot(point.x - previous.x, point.y - previous.y);
       distance += segment;
       const heading = segment > 1e-6 ? Math.atan2(point.y - previous.y, point.x - previous.x) : previous.heading;
-      const sample = { ...point, distance, heading };
+      const sample = { ...point, distance, heading, segmentIndex:index };
       samples.push(sample); previous = sample;
     }
   }
@@ -73,7 +74,7 @@ function playbackData() {
   return { samples, profile:motionProfile(samples.at(-1)?.distance ?? 0, documentState.robot) };
 }
 
-function poseAtDistance(samples, distance, reversed = false) {
+function poseAtDistance(samples, distance, path) {
   if (!samples.length) return null;
   let upperIndex = samples.findIndex((sample) => sample.distance >= distance);
   if (upperIndex < 0) upperIndex = samples.length - 1;
@@ -83,7 +84,7 @@ function poseAtDistance(samples, distance, reversed = false) {
   const ratio = span > 1e-6 ? (distance - lower.distance) / span : 0;
   let heading = upper.heading;
   if (upperIndex === samples.length - 1) heading = activePath()?.waypoints.at(-1)?.heading ?? heading;
-  if (reversed) heading = wrapRadians(heading + Math.PI);
+  if (path?.segmentReversed?.[upper.segmentIndex]) heading = wrapRadians(heading + Math.PI);
   return { x:lower.x + (upper.x - lower.x) * ratio, y:lower.y + (upper.y - lower.y) * ratio, heading };
 }
 
@@ -96,7 +97,7 @@ function updatePlaybackUi() {
   const button = document.querySelector("#play-path");
   button.textContent = playback.playing ? "❚❚" : "▶";
   button.setAttribute("aria-label", playback.playing ? "Pause path" : "Play full path");
-  const pose = poseAtDistance(samples, profileDistance(profile, playback.time), activePath()?.reversed);
+  const pose = poseAtDistance(samples, profileDistance(profile, playback.time), activePath());
   const robot = document.querySelector("#playback-robot");
   if (pose && robot) robot.setAttribute("transform", `translate(${pose.x} ${FIELD_SIZE - pose.y}) rotate(${-pose.heading * 180 / Math.PI})`);
 }
@@ -162,12 +163,15 @@ function fieldMarkup() {
 
 function pathMarkup(path) {
   if (!path?.waypoints.length) return "";
-  let d = `M${path.waypoints[0].x} ${FIELD_SIZE - path.waypoints[0].y}`;
+  normalizeSegmentDirections(path);
+  const curves = [];
   for (let index = 0; index + 1 < path.waypoints.length; index += 1) {
+    let d = `M${path.waypoints[index].x} ${FIELD_SIZE - path.waypoints[index].y}`;
     for (let step = 1; step <= 30; step += 1) {
       const sample = quinticPoint(path.waypoints[index], path.waypoints[index + 1], step / 30);
       d += ` L${sample.x} ${FIELD_SIZE - sample.y}`;
     }
+    curves.push(`<path class="path-shadow" d="${d}"/><path class="path-curve ${path.segmentReversed[index] ? "reversed" : ""}" d="${d}"/>`);
   }
   const controls = path.waypoints.map((point, index) => {
     const handleX = point.x + Math.cos(point.heading) * point.tangent / 5;
@@ -179,11 +183,11 @@ function pathMarkup(path) {
       <text class="anchor-label" x="${point.x + 3.8}" y="${FIELD_SIZE - point.y - 3}">${String(index + 1).padStart(2,"0")}</text></g>`;
   }).join("");
   const robot = documentState.robot;
-  const robotMarkup = `<g id="playback-robot" transform="translate(${path.waypoints[0].x} ${FIELD_SIZE - path.waypoints[0].y}) rotate(${-(path.waypoints[0].heading + (path.reversed ? Math.PI : 0)) * 180 / Math.PI})">
+  const robotMarkup = `<g id="playback-robot" transform="translate(${path.waypoints[0].x} ${FIELD_SIZE - path.waypoints[0].y}) rotate(${-(path.waypoints[0].heading + (path.segmentReversed[0] ? Math.PI : 0)) * 180 / Math.PI})">
     <rect class="robot-box" x="${-robot.length / 2}" y="${-robot.width / 2}" width="${robot.length}" height="${robot.width}" rx="1"/>
     <line class="robot-nose" x1="${robot.length * .12}" y1="0" x2="${robot.length * .43}" y2="0"/>
   </g>`;
-  return `${d ? `<path class="path-shadow" d="${d}"/><path class="path-curve ${path.reversed ? "reversed" : ""}" d="${d}"/>` : ""}${controls}${robotMarkup}`;
+  return `${curves.join("")}${controls}${robotMarkup}`;
 }
 
 function render() {
@@ -192,7 +196,7 @@ function render() {
   titleNode.textContent = documentState.title;
   pathList.innerHTML = documentState.paths.map((item, index) => `<div class="path-item ${item.id === activePathId ? "is-active" : ""}">
     <button class="path-select" data-path-id="${item.id}" aria-label="Edit ${escapeHtml(item.name)}"><i class="path-swatch" style="background:${escapeHtml(item.color)}"></i><span><strong>${escapeHtml(item.name)}</strong><small>${item.waypoints.length} anchors</small></span><b>${String(index + 1).padStart(2,"0")}</b></button>
-    <button class="path-direction-toggle ${item.reversed ? "is-reversed" : ""}" data-reverse-path-id="${item.id}" aria-pressed="${item.reversed}" title="Set ${escapeHtml(item.name)} drive direction"><span>${item.reversed ? "Reverse" : "Forward"}</span><b>⇄</b></button>
+    <div class="path-direction-status"><span>${item.segmentReversed.some(Boolean) ? (item.segmentReversed.every(Boolean) ? "All reverse" : "Mixed direction") : "All forward"}</span><b>⇄</b></div>
   </div>`).join("");
   const point = selectedPoint();
   document.querySelector("#waypoint-inspector").style.opacity = point ? "1" : ".4";
@@ -210,8 +214,12 @@ function render() {
     <label><span class="visually-hidden">Anchor ${index + 1} X coordinate in inches</span><input data-coordinate-point-id="${item.id}" data-coordinate="x" type="number" min="0" max="144" step="0.1" value="${item.x.toFixed(1)}" /></label>
     <label><span class="visually-hidden">Anchor ${index + 1} Y coordinate in inches</span><input data-coordinate-point-id="${item.id}" data-coordinate="y" type="number" min="0" max="144" step="0.1" value="${item.y.toFixed(1)}" /></label>
   </div>`).join("");
+  segmentList.innerHTML = (path?.segmentReversed ?? []).map((reversed, index) => `<button class="segment-direction ${reversed ? "is-reversed" : ""}" data-segment-index="${index}" aria-pressed="${reversed}">
+    <span><b>P${String(index + 1).padStart(2,"0")} → P${String(index + 2).padStart(2,"0")}</b><small>Segment ${String(index + 1).padStart(2,"0")}</small></span><strong>${reversed ? "Reverse" : "Forward"}</strong>
+  </button>`).join("");
   document.querySelector("#path-summary").textContent = `${path?.waypoints.length ?? 0} anchors · ${estimateLength(path?.waypoints ?? []).toFixed(1)} in`;
-  document.querySelector("#drive-direction").value = path?.reversed ? "reverse" : "forward";
+  const directions = path?.segmentReversed ?? [];
+  document.querySelector("#direction-summary").textContent = directions.some(Boolean) ? (directions.every(Boolean) ? "All reverse" : "Mixed") : "All forward";
   document.querySelector("#snap-toggle").checked = documentState.snap;
   document.querySelector("#zone-toggle").checked = documentState.showZones;
   robotInputs.forEach((input) => { input.value = Number(documentState.robot[input.dataset.robot]).toFixed(1); });
@@ -233,7 +241,7 @@ function addPoint(at = { x: 72, y: 72 }) {
   const previous = path.waypoints.at(-1);
   const heading = previous ? Math.atan2(at.y - previous.y, at.x - previous.x) : 0;
   const point = { id: uid(), x: snap(at.x), y: snap(at.y), heading, tangent: previous ? Math.max(18, Math.hypot(at.x - previous.x, at.y - previous.y)) : 30 };
-  path.waypoints.push(point); selectedPointId = point.id; commit("Waypoint added");
+  path.waypoints.push(point); path.segmentReversed.push(false); selectedPointId = point.id; commit("Waypoint added");
 }
 
 function deletePoint() {
@@ -242,6 +250,8 @@ function deletePoint() {
   const index = path.waypoints.findIndex((point) => point.id === selectedPointId);
   if (index < 0) return;
   path.waypoints.splice(index, 1);
+  if (index === 0) path.segmentReversed.shift();
+  else path.segmentReversed.splice(Math.min(index, path.segmentReversed.length - 1), 1);
   selectedPointId = path.waypoints[Math.min(index, path.waypoints.length - 1)]?.id ?? null;
   commit("Waypoint deleted");
 }
@@ -254,7 +264,7 @@ function transformPath(mode) {
 
 function newPath() {
   const number = documentState.paths.length + 1;
-  const path = { id:uid(), name:`Route ${number}`, color:"#171715", reversed:false, waypoints:[
+  const path = { id:uid(), name:`Route ${number}`, color:"#171715", segmentReversed:[false], waypoints:[
     { id:uid(), x:18, y:18, heading:0, tangent:30 }, { id:uid(), x:54, y:24, heading:.2, tangent:30 }
   ] };
   documentState.paths.push(path); activePathId = path.id; selectedPointId = path.waypoints[0].id; commit("New path created");
@@ -278,7 +288,7 @@ function runAction(action) {
   if (action === "mirror-quadrant") return transformPath("quadrant");
   if (action === "mirror-left-right") return transformPath("left-right");
   if (action === "mirror-bottom-top") return transformPath("bottom-top");
-  if (action === "reverse-order") { const path=activePath(); if(path){path.waypoints=reverseWaypoints(path.waypoints);commit("Path order reversed");} return; }
+  if (action === "reverse-order") { const path=activePath(); if(path){path.waypoints=reverseWaypoints(path.waypoints);path.segmentReversed.reverse();commit("Path order reversed");} return; }
   if (action === "play-path") return togglePlayback();
   if (action === "delete-path") {
     if (!activePath()) return;
@@ -301,10 +311,10 @@ document.addEventListener("click", (event) => {
   if (action) runAction(action);
   const pathButton = event.target.closest("[data-path-id]");
   if (pathButton) { stopPlayback(true); activePathId = pathButton.dataset.pathId; selectedPointId = activePath()?.waypoints[0]?.id ?? null; render(); }
-  const reverseButton = event.target.closest("[data-reverse-path-id]");
-  if (reverseButton) {
-    const path = documentState.paths.find((item) => item.id === reverseButton.dataset.reversePathId);
-    if (path) { path.reversed = !path.reversed; commit(`${path.name} set to ${path.reversed ? "reverse" : "forward"} drive`); }
+  const segmentButton = event.target.closest("[data-segment-index]");
+  if (segmentButton) {
+    const path = activePath(); const index = Number(segmentButton.dataset.segmentIndex);
+    if (path?.segmentReversed[index] !== undefined) { path.segmentReversed[index] = !path.segmentReversed[index]; commit(`Segment ${index + 1} set to ${path.segmentReversed[index] ? "reverse" : "forward"} drive`); }
   }
   const pointButton = event.target.closest("[data-select-point-id]");
   if (pointButton) { selectedPointId = pointButton.dataset.selectPointId; stopPlayback(true); render(); }
@@ -372,7 +382,6 @@ scrubber.addEventListener("input", () => {
 
 document.querySelector("#snap-toggle").addEventListener("change", (event) => { documentState.snap=event.target.checked;commit(); });
 document.querySelector("#zone-toggle").addEventListener("change", (event) => { documentState.showZones=event.target.checked;commit(); });
-document.querySelector("#drive-direction").addEventListener("change", (event) => { const path=activePath();if(path){path.reversed=event.target.value === "reverse";commit(`Drive direction set to ${event.target.value}`);} });
 titleNode.addEventListener("blur", () => { documentState.title=titleNode.textContent.trim() || "Untitled path";commit(); });
 titleNode.addEventListener("keydown", (event) => { if(event.key === "Enter"){event.preventDefault();titleNode.blur();} });
 fileInput.addEventListener("change", async () => {

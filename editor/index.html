@@ -67,7 +67,7 @@
               <label class="scrubber-label" for="path-scrubber"><span class="visually-hidden">Path playback position</span><input id="path-scrubber" type="range" min="0" max="1000" value="0" /></label>
               <output id="playback-time">0.0 / 0.0 s</output>
             </div>
-            <label><span>Drive direction</span><select id="drive-direction"><option value="forward">Forward</option><option value="reverse">Reverse</option></select></label>
+            <div class="direction-summary"><span>Drive direction</span><strong id="direction-summary">All forward</strong></div>
           </div>
         </section>
 
@@ -95,6 +95,11 @@
             <div class="section-label"><span>All waypoint coordinates</span><small id="waypoint-count">0 points</small></div>
             <div class="waypoint-list-heading" aria-hidden="true"><span>Point</span><span>X / in</span><span>Y / in</span></div>
             <div id="waypoint-list" class="waypoint-list"></div>
+          </section>
+
+          <section class="inspector-section segment-list-section">
+            <div class="section-label"><span>Segment drive direction</span><small>independent per section</small></div>
+            <div id="segment-list" class="segment-list"></div>
           </section>
 
           <section class="inspector-section robot-section">

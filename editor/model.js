@@ -38,6 +38,30 @@ export function reverseWaypoints(points) {
   return [...points].reverse().map((point) => ({ ...point, heading: wrapRadians(point.heading + Math.PI) }));
 }
 
+export function normalizeSegmentDirections(path) {
+  const count = Math.max(0, path.waypoints.length - 1);
+  const legacyDirection = path.reversed === true;
+  path.segmentReversed = Array.from({ length: count }, (_, index) =>
+    typeof path.segmentReversed?.[index] === "boolean" ? path.segmentReversed[index] : legacyDirection
+  );
+  delete path.reversed;
+  return path.segmentReversed;
+}
+
+export function directionRuns(path) {
+  normalizeSegmentDirections(path);
+  if (path.waypoints.length < 2) return [];
+  const runs = [];
+  let start = 0;
+  for (let segment = 1; segment <= path.segmentReversed.length; segment += 1) {
+    if (segment === path.segmentReversed.length || path.segmentReversed[segment] !== path.segmentReversed[start]) {
+      runs.push({ reversed:path.segmentReversed[start], waypoints:path.waypoints.slice(start, segment + 1) });
+      start = segment;
+    }
+  }
+  return runs;
+}
+
 export function cornerToGps(point) {
   return {
     ...point,
@@ -121,7 +145,7 @@ export function makeDocument() {
     showZones: true,
     robot: { ...DEFAULT_ROBOT },
     paths: [{
-      id: crypto.randomUUID(), name: "Primary route", color: "#171715", reversed: false,
+      id: crypto.randomUUID(), name: "Primary route", color: "#171715", segmentReversed: [false, false],
       waypoints: [
         { id: crypto.randomUUID(), x: 18, y: 18, heading: 0.18, tangent: 38 },
         { id: crypto.randomUUID(), x: 68, y: 50, heading: 0.82, tangent: 42 },
@@ -135,11 +159,11 @@ export function validateDocument(value) {
   if (!value || value.type !== "VantagePathDocument" || value.version !== 1 || !Array.isArray(value.paths)) throw new Error("This is not a supported VantagePath file.");
   for (const path of value.paths) {
     if (!path.id || !Array.isArray(path.waypoints)) throw new Error("A path is missing its waypoint data.");
-    path.reversed = path.reversed === true;
     for (const point of path.waypoints) {
       for (const key of ["x", "y", "heading", "tangent"]) if (!Number.isFinite(point[key])) throw new Error(`Waypoint ${key} must be a number.`);
       point.x = clamp(point.x); point.y = clamp(point.y); point.tangent = Math.max(1, point.tangent);
     }
+    normalizeSegmentDirections(path);
   }
   value.robot = { ...DEFAULT_ROBOT, ...(value.robot ?? {}) };
   for (const key of Object.keys(DEFAULT_ROBOT)) {
@@ -157,16 +181,24 @@ export function validateDocument(value) {
 export function cppExport(document, variableName, frame = "corner") {
   const safeName = /^[A-Za-z_][A-Za-z0-9_]*$/.test(variableName) ? variableName : "generatedPath";
   const blocks = document.paths.map((path, index) => {
-    const gps = frame === "gps";
-    const points = gps ? path.waypoints.map(cornerToGps) : path.waypoints;
-    const unit = frame === "gps" ? "metres / official GPS centre frame" : "inches / bottom-left corner frame";
-    const entries = points.map((point) => `    {{${point.x.toFixed(4)}, ${point.y.toFixed(4)}, ${point.heading.toFixed(6)}}, ${point.tangent.toFixed(4)}}`).join(",\n");
-    const suffix = document.paths.length === 1 ? "" : `${index + 1}`;
-    const gpsSuffix = gps ? "Gps" : "";
-    const distanceScale = gps ? INCH_TO_METRE : 1;
-    const distance = (value) => (value * distanceScale).toFixed(4);
-    const conversion = gps ? `\nconst std::vector<vantage::Waypoint> ${safeName}${suffix} = [] {\n  auto waypoints = ${safeName}${suffix}Gps;\n  for (auto& waypoint : waypoints) {\n    waypoint.pose = vantage::vexGpsToCorner(\n        waypoint.pose, {3.6576, 3.6576});\n  }\n  return waypoints;\n}();\n` : "\n";
-    return `// ${path.name} — ${unit}\nconst std::vector<vantage::Waypoint> ${safeName}${suffix}${gpsSuffix} = {\n${entries}\n};\n${conversion}\nconst vantage::TrajectoryConfig ${safeName}${suffix}Config = [] {\n  vantage::TrajectoryConfig config;\n  config.trackWidth = ${distance(document.robot.trackWidth)};\n  config.maxVelocity = ${distance(document.robot.maxVelocity)};\n  config.maxAcceleration = ${distance(document.robot.maxAcceleration)};\n  config.maxDeceleration = ${distance(document.robot.maxDeceleration)};\n  config.maxCentripetalAcceleration = ${distance(document.robot.maxCentripetalAcceleration)};\n  config.maxWheelVelocity = ${distance(document.robot.maxWheelVelocity)};\n  config.startVelocity = ${distance(document.robot.startVelocity)};\n  config.endVelocity = ${distance(document.robot.endVelocity)};\n  config.reversed = ${path.reversed ? "true" : "false"};\n  return config;\n}();\nconst auto ${safeName}${suffix}Trajectory = vantage::generateTrajectory(${safeName}${suffix}, ${safeName}${suffix}Config);`;
+    const runs = directionRuns(path);
+    const routeSuffix = document.paths.length === 1 ? "" : `${index + 1}`;
+    const trajectoryNames = [];
+    const runBlocks = runs.map((run, runIndex) => {
+      const gps = frame === "gps";
+      const points = gps ? run.waypoints.map(cornerToGps) : run.waypoints;
+      const unit = gps ? "metres / official GPS centre frame" : "inches / bottom-left corner frame";
+      const runSuffix = runs.length === 1 ? "" : `Segment${runIndex + 1}`;
+      const name = `${safeName}${routeSuffix}${runSuffix}`;
+      trajectoryNames.push(`${name}Trajectory`);
+      const entries = points.map((point) => `    {{${point.x.toFixed(4)}, ${point.y.toFixed(4)}, ${point.heading.toFixed(6)}}, ${point.tangent.toFixed(4)}}`).join(",\n");
+      const distanceScale = gps ? INCH_TO_METRE : 1;
+      const distance = (value) => (value * distanceScale).toFixed(4);
+      const conversion = gps ? `\nconst std::vector<vantage::Waypoint> ${name} = [] {\n  auto waypoints = ${name}Gps;\n  for (auto& waypoint : waypoints) {\n    waypoint.pose = vantage::vexGpsToCorner(\n        waypoint.pose, {3.6576, 3.6576});\n  }\n  return waypoints;\n}();\n` : "\n";
+      return `// ${path.name}${runs.length > 1 ? ` · direction section ${runIndex + 1}` : ""} — ${unit}\nconst std::vector<vantage::Waypoint> ${name}${gps ? "Gps" : ""} = {\n${entries}\n};\n${conversion}\nconst vantage::TrajectoryConfig ${name}Config = [] {\n  vantage::TrajectoryConfig config;\n  config.trackWidth = ${distance(document.robot.trackWidth)};\n  config.maxVelocity = ${distance(document.robot.maxVelocity)};\n  config.maxAcceleration = ${distance(document.robot.maxAcceleration)};\n  config.maxDeceleration = ${distance(document.robot.maxDeceleration)};\n  config.maxCentripetalAcceleration = ${distance(document.robot.maxCentripetalAcceleration)};\n  config.maxWheelVelocity = ${distance(document.robot.maxWheelVelocity)};\n  config.startVelocity = ${distance(runIndex === 0 ? document.robot.startVelocity : 0)};\n  config.endVelocity = ${distance(runIndex === runs.length - 1 ? document.robot.endVelocity : 0)};\n  config.reversed = ${run.reversed ? "true" : "false"};\n  return config;\n}();\nconst auto ${name}Trajectory = vantage::generateTrajectory(${name}, ${name}Config);`;
+    });
+    const collection = runs.length > 1 ? `\n\n// Run these sections in order; direction changes require a stop.\nconst std::vector<vantage::Trajectory> ${safeName}${routeSuffix}Trajectories = { ${trajectoryNames.join(", ")} };` : "";
+    return runBlocks.join("\n\n") + collection;
   });
   return `// Generated by VantagePath Studio\n#include <vantage/vantage.hpp>\n#include <vector>\n\n${blocks.join("\n\n")}`;
 }

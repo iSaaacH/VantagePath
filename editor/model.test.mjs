@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { FIELD_SIZE, cornerToGps, cppExport, estimateLength, makeDocument, mirrorWaypoint, motionProfile, profileDistance, reverseWaypoints, validateDocument } from "./model.js";
+import { FIELD_SIZE, cornerToGps, cppExport, directionRuns, estimateLength, makeDocument, mirrorWaypoint, motionProfile, profileDistance, reverseWaypoints, validateDocument } from "./model.js";
 
 assert.equal(FIELD_SIZE, 144, "the playable floor is exactly 144 inches");
 assert.deepEqual(
@@ -23,12 +23,15 @@ assert.match(cppExport(document,"competitionAuto","gps"),/vexGpsToCorner/);
 assert.match(cppExport(document,"competitionAuto","corner"),/config\.maxVelocity = 60\.0000/);
 assert.match(cppExport(document,"competitionAuto","gps"),/config\.maxVelocity = 1\.5240/);
 assert.match(cppExport(document,"bad-name","corner"),/generatedPath/);
-document.paths[0].reversed = true;
-assert.match(cppExport(document,"competitionAuto","corner"),/config\.reversed = true/, "route direction is exported independently");
+document.paths[0].segmentReversed = [false, true];
+assert.deepEqual(directionRuns(document.paths[0]).map((run) => run.reversed), [false, true]);
+const mixedExport = cppExport(document,"competitionAuto","corner");
+assert.match(mixedExport,/competitionAutoSegment1Config[\s\S]*config\.reversed = false/);
+assert.match(mixedExport,/competitionAutoSegment2Config[\s\S]*config\.reversed = true/);
+assert.match(mixedExport,/competitionAutoTrajectories/, "mixed direction sections are exported in execution order");
 const profile = motionProfile(120, document.robot);
 assert.ok(profile.duration > 0); assert.equal(profileDistance(profile, profile.duration), 120);
-const legacy = makeDocument(); delete legacy.robot;
+const legacy = makeDocument(); delete legacy.robot; delete legacy.paths[0].segmentReversed; legacy.paths[0].reversed = true;
 assert.equal(validateDocument(legacy).robot.length, 18);
-delete legacy.paths[0].reversed;
-assert.equal(validateDocument(legacy).paths[0].reversed, false, "legacy paths default to forward drive");
+assert.deepEqual(validateDocument(legacy).paths[0].segmentReversed, [true, true], "legacy route direction migrates to every segment");
 console.log("All VantagePath Studio model tests passed");
