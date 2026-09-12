@@ -225,6 +225,32 @@ int main() {
   expect(output.leftVoltage > 0 && output.rightVoltage > 0,
          "follower commands both wheels on straight path");
 
+  // Once a completed trajectory is inside every tolerance, the settle window
+  // must observe the stopped robot without re-energising it. Otherwise the
+  // terminal pose correction and +/-kS can repeatedly kick it across the goal.
+  FollowerConfig settleConfig = followerConfig;
+  settleConfig.positionTolerance = 0.1;
+  settleConfig.headingTolerance = 0.1;
+  settleConfig.velocityTolerance = 0.1;
+  settleConfig.settleCycles = 3;
+  settleConfig.leftFeedforward.staticGain = 0.2;
+  settleConfig.rightFeedforward.staticGain = 0.2;
+  TrajectoryFollower settlingFollower(settleConfig);
+  settlingFollower.start(straight, 0.0);
+  const Pose2d nearEnd{straight.states().back().pose.x - 0.05,
+                       straight.states().back().pose.y,
+                       straight.states().back().pose.theta};
+  for (unsigned cycle = 0; cycle < settleConfig.settleCycles; ++cycle) {
+    const FollowerOutput settling = settlingFollower.update(
+        straight.duration() + cycle * 0.01, nearEnd, {}, 12.0);
+    near(settling.leftVoltage, 0.0, 1e-12,
+         "settle confirmation does not re-energise left wheel");
+    near(settling.rightVoltage, 0.0, 1e-12,
+         "settle confirmation does not re-energise right wheel");
+  }
+  expect(settlingFollower.status() == FollowerStatus::kSettled,
+         "settle confirmation still reaches settled state");
+
   // End-to-end kinematic simulation with perfect wheel-speed actuators. This
   // exercises timed sampling, nonlinear feedback, kinematics, and settling on
   // a changing-curvature S path rather than only isolated formulas.

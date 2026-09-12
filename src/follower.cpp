@@ -50,6 +50,36 @@ FollowerOutput TrajectoryFollower::update(
     return output;
   }
 
+  const bool timeComplete = elapsed >= trajectory_->duration();
+  const bool poseSettled = positionError <= config_.positionTolerance &&
+      std::abs(output.poseError.heading) <= config_.headingTolerance;
+  const bool wheelsSettled =
+      std::abs(measuredWheelSpeeds.left) <= config_.velocityTolerance &&
+      std::abs(measuredWheelSpeeds.right) <= config_.velocityTolerance;
+  const bool settleCandidate = timeComplete && poseSettled && wheelsSettled;
+
+  // Do not kick a stopped robot back out of tolerance while confirming that it
+  // is settled. Pose feedback can still request a small non-zero wheel speed
+  // anywhere inside positionTolerance, and static feedforward then turns that
+  // request into a full +/-kS step. Applying those commands during the settle
+  // window produces an avoidable forward/reverse limit cycle.
+  if (settleCandidate) {
+    ++settledCycles_;
+    previousSetpoint_ = {};
+    previousTime_ = nowSeconds;
+    leftPid_.reset();
+    rightPid_.reset();
+    if (settledCycles_ >= config_.settleCycles) {
+      status_ = FollowerStatus::kSettled;
+    } else if (elapsed > trajectory_->duration() +
+                           config_.timeoutAfterTrajectory) {
+      status_ = FollowerStatus::kTimedOut;
+    }
+    output.status = status_;
+    return output;
+  }
+  settledCycles_ = 0;
+
   const ChassisSpeeds command = poseController_.calculate(pose, reference);
   output.wheelSetpoint = kinematics_.toWheelSpeeds(command);
   const double leftAcceleration =
@@ -80,20 +110,8 @@ FollowerOutput TrajectoryFollower::update(
     output.saturated = true;
   }
 
-  const bool timeComplete = elapsed >= trajectory_->duration();
-  const bool poseSettled = positionError <= config_.positionTolerance &&
-      std::abs(output.poseError.heading) <= config_.headingTolerance;
-  const bool wheelsSettled =
-      std::abs(measuredWheelSpeeds.left) <= config_.velocityTolerance &&
-      std::abs(measuredWheelSpeeds.right) <= config_.velocityTolerance;
-  settledCycles_ = timeComplete && poseSettled && wheelsSettled
-                       ? settledCycles_ + 1 : 0;
-  if (settledCycles_ >= config_.settleCycles) {
-    status_ = FollowerStatus::kSettled;
-    output.leftVoltage = 0.0;
-    output.rightVoltage = 0.0;
-  } else if (elapsed > trajectory_->duration() +
-                         config_.timeoutAfterTrajectory) {
+  if (elapsed > trajectory_->duration() +
+                    config_.timeoutAfterTrajectory) {
     status_ = FollowerStatus::kTimedOut;
     output.leftVoltage = 0.0;
     output.rightVoltage = 0.0;
