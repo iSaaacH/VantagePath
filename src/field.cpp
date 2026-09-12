@@ -1,6 +1,7 @@
 #include "vantage/field.hpp"
 
 #include <stdexcept>
+#include <algorithm>
 
 namespace vantage {
 namespace {
@@ -49,6 +50,7 @@ std::vector<Waypoint> mirrorWaypoints(
   std::vector<Waypoint> result = waypoints;
   for (Waypoint& waypoint : result) {
     waypoint.pose = mirrorPose(waypoint.pose, mirror, field);
+    for (auto& control : waypoint.controlPoints) control = mirrorPose(control, mirror, field);
   }
   return result;
 }
@@ -56,8 +58,11 @@ std::vector<Waypoint> mirrorWaypoints(
 std::vector<Waypoint> reverseWaypoints(
     const std::vector<Waypoint>& waypoints) {
   std::vector<Waypoint> result(waypoints.rbegin(), waypoints.rend());
-  for (Waypoint& waypoint : result) {
-    waypoint.pose.theta = wrapAngle(waypoint.pose.theta + kPi);
+  for (std::size_t i = 0; i < result.size(); ++i) {
+    result[i].pose.theta = wrapAngle(result[i].pose.theta + kPi);
+    result[i].bezierToNext = i + 1 < result.size() && waypoints[waypoints.size()-2-i].bezierToNext;
+    result[i].controlPoints = i + 1 < result.size() ? waypoints[waypoints.size()-2-i].controlPoints : std::vector<Pose2d>{};
+    std::reverse(result[i].controlPoints.begin(), result[i].controlPoints.end());
   }
   return result;
 }

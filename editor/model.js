@@ -44,6 +44,7 @@ export function normalizeSegmentDirections(path) {
   path.segmentReversed = Array.from({ length: count }, (_, index) =>
     typeof path.segmentReversed?.[index] === "boolean" ? path.segmentReversed[index] : legacyDirection
   );
+  path.controlPoints = Array.from({ length: count }, (_, index) => path.controlPoints?.[index] ?? null);
   delete path.reversed;
   return path.segmentReversed;
 }
@@ -55,7 +56,7 @@ export function directionRuns(path) {
   let start = 0;
   for (let segment = 1; segment <= path.segmentReversed.length; segment += 1) {
     if (segment === path.segmentReversed.length || path.segmentReversed[segment] !== path.segmentReversed[start]) {
-      runs.push({ reversed:path.segmentReversed[start], waypoints:path.waypoints.slice(start, segment + 1) });
+      runs.push({ reversed:path.segmentReversed[start], waypoints:path.waypoints.slice(start, segment + 1), controlPoints:path.controlPoints.slice(start, segment) });
       start = segment;
     }
   }
@@ -72,12 +73,45 @@ export function cornerToGps(point) {
   };
 }
 
-export function estimateLength(points, subdivisions = 24, segmentReversed = []) {
+// null keeps legacy Hermite geometry; [] explicitly means a straight Bézier line.
+export function bezierPoint(points, t) {
+  const work = points.map(({ x, y }) => ({ x, y }));
+  for (let size = work.length - 1; size > 0; size -= 1) {
+    for (let i = 0; i < size; i += 1) {
+      work[i].x += (work[i + 1].x - work[i].x) * t;
+      work[i].y += (work[i + 1].y - work[i].y) * t;
+    }
+  }
+  return work[0];
+}
+
+export function segmentPoint(path, index, t) {
+  const start = path.waypoints[index], end = path.waypoints[index + 1];
+  const controls = path.controlPoints?.[index];
+  return Array.isArray(controls) ? bezierPoint([start, ...controls, end], t)
+    : quinticPoint(start, end, t, path.segmentReversed?.[index] === true);
+}
+
+export function setControlCount(path, index, count) {
+  if (!Number.isInteger(count) || count < 0 || !path.waypoints[index + 1]) return;
+  normalizeSegmentDirections(path);
+  const controls = path.controlPoints[index] ?? [];
+  const start = controls.at(-1) ?? path.waypoints[index];
+  const end = path.waypoints[index + 1];
+  const extra = count - controls.length;
+  for (let i = 1; i <= extra; i += 1) {
+    controls.push({ id:crypto.randomUUID(), x:start.x + (end.x-start.x)*i/(extra+1), y:start.y + (end.y-start.y)*i/(extra+1) });
+  }
+  controls.length = count;
+  path.controlPoints[index] = controls;
+}
+
+export function estimateLength(points, subdivisions = 24, segmentReversed = [], controlPoints = []) {
   let length = 0;
   for (let segment = 0; segment + 1 < points.length; segment += 1) {
     let previous = points[segment];
     for (let step = 1; step <= subdivisions; step += 1) {
-      const current = quinticPoint(points[segment], points[segment + 1], step / subdivisions, segmentReversed[segment] === true);
+      const current = segmentPoint({ waypoints:points, segmentReversed, controlPoints }, segment, step / subdivisions);
       length += Math.hypot(current.x - previous.x, current.y - previous.y);
       previous = current;
     }
@@ -150,7 +184,7 @@ export function makeDocument() {
     showZones: true,
     robot: { ...DEFAULT_ROBOT },
     paths: [{
-      id: crypto.randomUUID(), name: "Primary route", color: "#171715", segmentReversed: [false, false],
+      id: crypto.randomUUID(), name: "Primary route", color: "#171715", segmentReversed: [false, false], controlPoints: [[], []],
       waypoints: [
         { id: crypto.randomUUID(), x: 18, y: 18, heading: 0.18, tangent: 38 },
         { id: crypto.randomUUID(), x: 68, y: 50, heading: 0.82, tangent: 42 },
@@ -168,7 +202,17 @@ export function validateDocument(value) {
       for (const key of ["x", "y", "heading", "tangent"]) if (!Number.isFinite(point[key])) throw new Error(`Waypoint ${key} must be a number.`);
       point.x = clamp(point.x); point.y = clamp(point.y); point.tangent = Math.max(1, point.tangent);
     }
+    if (path.controlPoints !== undefined && !Array.isArray(path.controlPoints)) throw new Error("Invalid control point data.");
     normalizeSegmentDirections(path);
+    for (const controls of path.controlPoints) {
+      if (controls === null) continue;
+      if (!Array.isArray(controls)) throw new Error("Invalid control point list.");
+      for (const point of controls) {
+        if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) throw new Error("Control coordinates must be numbers.");
+        point.x = clamp(point.x); point.y = clamp(point.y);
+        point.id ||= crypto.randomUUID();
+      }
+    }
   }
   value.robot = { ...DEFAULT_ROBOT, ...(value.robot ?? {}) };
   for (const key of Object.keys(DEFAULT_ROBOT)) {
@@ -204,10 +248,17 @@ export function cppExport(document, variableName, frame = "corner") {
       const runSuffix = runs.length === 1 ? "" : `Segment${runIndex + 1}`;
       const name = `${safeName}${routeSuffix}${runSuffix}`;
       trajectoryNames.push(`${name}Trajectory`);
-      const entries = points.map((point) => `    {{${point.x.toFixed(4)}, ${point.y.toFixed(4)}, ${point.heading.toFixed(6)}}, ${point.tangent.toFixed(4)}}`).join(",\n");
+      const entries = points.map((point, pointIndex) => {
+        const controls = run.controlPoints[pointIndex];
+        const extra = Array.isArray(controls) ? `, true, {${controls.map((control) => {
+          const p = gps ? cornerToGps({ ...control, heading:0, tangent:0 }) : { ...control, heading:0 };
+          return `{${p.x.toFixed(4)}, ${p.y.toFixed(4)}, ${p.heading.toFixed(6)}}`;
+        }).join(", ")}}` : "";
+        return `    {{${point.x.toFixed(4)}, ${point.y.toFixed(4)}, ${point.heading.toFixed(6)}}, ${point.tangent.toFixed(4)}${extra}}`;
+      }).join(",\n");
       const distanceScale = gps ? INCH_TO_METRE : 1;
       const distance = (value) => (value * distanceScale).toFixed(4);
-      const conversion = gps ? `\nconst std::vector<vantage::Waypoint> ${name} = [] {\n  auto waypoints = ${name}Gps;\n  for (auto& waypoint : waypoints) {\n    waypoint.pose = vantage::vexGpsToCorner(\n        waypoint.pose, {3.6576, 3.6576});\n  }\n  return waypoints;\n}();\n` : "\n";
+      const conversion = gps ? `\nconst std::vector<vantage::Waypoint> ${name} = [] {\n  auto waypoints = ${name}Gps;\n  for (auto& waypoint : waypoints) {\n    for (auto& control : waypoint.controlPoints) control = vantage::vexGpsToCorner(control, {3.6576, 3.6576});\n    waypoint.pose = vantage::vexGpsToCorner(\n        waypoint.pose, {3.6576, 3.6576});\n  }\n  return waypoints;\n}();\n` : "\n";
       return `// ${path.name}${runs.length > 1 ? ` · direction section ${runIndex + 1}` : ""} — ${unit}\nconst std::vector<vantage::Waypoint> ${name}${gps ? "Gps" : ""} = {\n${entries}\n};\n${conversion}\nconst vantage::TrajectoryConfig ${name}Config = [] {\n  vantage::TrajectoryConfig config;\n  config.trackWidth = ${distance(document.robot.trackWidth)};\n  config.maxVelocity = ${distance(document.robot.maxVelocity)};\n  config.maxAcceleration = ${distance(document.robot.maxAcceleration)};\n  config.maxDeceleration = ${distance(document.robot.maxDeceleration)};\n  config.maxCentripetalAcceleration = ${distance(document.robot.maxCentripetalAcceleration)};\n  config.maxWheelVelocity = ${distance(document.robot.maxWheelVelocity)};\n  config.startVelocity = ${distance(runIndex === 0 ? document.robot.startVelocity : 0)};\n  config.endVelocity = ${distance(runIndex === runs.length - 1 ? document.robot.endVelocity : 0)};\n  config.reversed = ${run.reversed ? "true" : "false"};\n  return config;\n}();\nconst auto ${name}Trajectory = vantage::generateTrajectory(${name}, ${name}Config);`;
     });
     const collection = runs.length > 1 ? `\n\n// Run these sections in order; direction changes require a stop.\nconst std::vector<vantage::Trajectory> ${safeName}${routeSuffix}Trajectories = { ${trajectoryNames.join(", ")} };` : "";

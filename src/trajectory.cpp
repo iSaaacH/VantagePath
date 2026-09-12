@@ -45,6 +45,26 @@ struct Quintic {
   }
 };
 
+Pose2d bezierValue(std::vector<Pose2d> points, double t) {
+  for (std::size_t size = points.size() - 1; size > 0; --size) {
+    for (std::size_t i = 0; i < size; ++i) {
+      points[i].x += (points[i + 1].x - points[i].x) * t;
+      points[i].y += (points[i + 1].y - points[i].y) * t;
+    }
+  }
+  return points.front();
+}
+
+std::vector<Pose2d> bezierDerivative(const std::vector<Pose2d>& points) {
+  std::vector<Pose2d> result;
+  const double degree = points.size() - 1;
+  for (std::size_t i = 1; i < points.size(); ++i)
+    result.push_back({degree * (points[i].x - points[i-1].x),
+                      degree * (points[i].y - points[i-1].y), 0.0});
+  if (result.empty()) result.push_back({0.0, 0.0, 0.0});
+  return result;
+}
+
 double distance(const Pose2d& a, const Pose2d& b) {
   return std::hypot(b.x - a.x, b.y - a.y);
 }
@@ -153,6 +173,10 @@ Trajectory generateTrajectory(const std::vector<Waypoint>& waypoints,
   std::vector<Sample> samples;
   std::vector<double> tangentScales(waypoints.size(), 0.0);
   for (std::size_t i = 0; i < waypoints.size(); ++i) {
+    if (!std::isfinite(waypoints[i].pose.x) || !std::isfinite(waypoints[i].pose.y) ||
+        !std::isfinite(waypoints[i].pose.theta) || !std::isfinite(waypoints[i].tangentScale)) {
+      throw std::invalid_argument("waypoint values must be finite");
+    }
     if (waypoints[i].tangentScale > 0.0) {
       tangentScales[i] = waypoints[i].tangentScale;
     } else if (i == 0) {
@@ -166,7 +190,12 @@ Trajectory generateTrajectory(const std::vector<Waypoint>& waypoints,
     }
   }
   double arcLength = 0.0;
+  std::vector<std::size_t> stopIndices;
   for (std::size_t segment = 0; segment + 1 < waypoints.size(); ++segment) {
+    // Independently edited Bézier segments may meet at a corner. Stop at
+    // their shared anchor instead of carrying speed through a heading jump.
+    if (segment > 0 && (waypoints[segment-1].bezierToNext || waypoints[segment].bezierToNext))
+      stopIndices.push_back(samples.size()-1);
     const Waypoint& start = waypoints[segment];
     const Waypoint& end = waypoints[segment + 1];
     const double chord = distance(start.pose, end.pose);
@@ -179,18 +208,41 @@ Trajectory generateTrajectory(const std::vector<Waypoint>& waypoints,
     const Quintic y = Quintic::connect(
         start.pose.y, std::sin(start.pose.theta) * startScale, 0.0,
         end.pose.y, std::sin(end.pose.theta) * endScale, 0.0);
+    std::vector<Pose2d> controls{start.pose};
+    if (start.bezierToNext) controls.insert(controls.end(), start.controlPoints.begin(), start.controlPoints.end());
+    controls.push_back(end.pose);
+    double polygonLength = 0.0;
+    for (std::size_t c = 1; c < controls.size(); ++c) {
+      if (!std::isfinite(controls[c].x) || !std::isfinite(controls[c].y))
+        throw std::invalid_argument("control coordinates must be finite");
+      polygonLength += distance(controls[c-1], controls[c]);
+    }
+    const auto first = bezierDerivative(controls);
+    const auto second = bezierDerivative(first);
     const int count = std::max(16, static_cast<int>(std::ceil(
-        chord / config.sampleDistance * 2.0)));
+        (start.bezierToNext ? polygonLength : chord) / config.sampleDistance * 2.0)));
     for (int i = segment == 0 ? 0 : 1; i <= count; ++i) {
       const double t = static_cast<double>(i) / count;
-      const double dx = x.first(t);
-      const double dy = y.first(t);
-      const double ddx = x.second(t);
-      const double ddy = y.second(t);
+      const auto position = start.bezierToNext ? bezierValue(controls, t) : Pose2d{x.value(t), y.value(t), 0.0};
+      const auto velocity = start.bezierToNext ? bezierValue(first, t) : Pose2d{x.first(t), y.first(t), 0.0};
+      const auto acceleration = start.bezierToNext ? bezierValue(second, t) : Pose2d{x.second(t), y.second(t), 0.0};
+      const double dx = velocity.x, dy = velocity.y;
+      const double ddx = acceleration.x, ddy = acceleration.y;
       const double denom = std::pow(dx * dx + dy * dy, 1.5);
       const double curvature = denom > 1e-12
                                    ? (dx * ddy - dy * ddx) / denom : 0.0;
-      Sample sample{{x.value(t), y.value(t), std::atan2(dy, dx)},
+      double heading = std::atan2(dy, dx);
+      // Repeated endpoint controls have a zero derivative, but still have a
+      // well-defined limiting tangent toward the first distinct control.
+      if (start.bezierToNext && std::hypot(dx, dy) < 1e-9 && (i == 0 || i == count)) {
+        for (std::size_t c = 1; c < controls.size(); ++c) {
+          const auto& other = i == 0 ? controls[c] : controls[controls.size()-1-c];
+          const double tx = i == 0 ? other.x-position.x : position.x-other.x;
+          const double ty = i == 0 ? other.y-position.y : position.y-other.y;
+          if (std::hypot(tx, ty) > 1e-9) { heading = std::atan2(ty, tx); break; }
+        }
+      }
+      Sample sample{{position.x, position.y, heading},
                     curvature, 0.0, arcLength};
       if (!samples.empty()) {
         arcLength += distance(samples.back().pose, sample.pose);
@@ -220,6 +272,7 @@ Trajectory generateTrajectory(const std::vector<Waypoint>& waypoints,
           velocity[i], std::sqrt(config.maxCentripetalAcceleration / curvature));
     }
   }
+  for (auto index : stopIndices) velocity[index] = 0.0;
   velocity.front() = std::min(velocity.front(), config.startVelocity);
   for (std::size_t i = 1; i < velocity.size(); ++i) {
     const double ds = samples[i].distance - samples[i - 1].distance;

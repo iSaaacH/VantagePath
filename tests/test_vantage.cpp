@@ -58,6 +58,53 @@ int main() {
   config.maxWheelVelocity = 2.1;
   config.trackWidth = 0.4;
   config.sampleDistance = 0.03;
+  // Bézier segments share the same constrained trajectory generator.
+  std::vector<Waypoint> bezierWaypoints = {
+      {{0, 0, 1.0}, 3.0, true, {}}, {{2, 0, -1.0}, 3.0}};
+  const auto bezierLine = generateTrajectory(bezierWaypoints, config);
+  near(bezierLine.length(), 2.0, 1e-9, "zero controls is a line despite endpoint headings");
+  for (const auto& state : bezierLine.states()) near(state.pose.y, 0.0, 1e-12, "line stays straight");
+  bezierWaypoints[0].controlPoints = {{0.2,0.2,0}, {0.4,0.6,0}, {0.7,1.0,0}, {1.3,1.0,0}, {1.6,0.6,0}, {1.8,0.2,0}};
+  const auto bezierCurve = generateTrajectory(bezierWaypoints, config);
+  expect(bezierCurve.length() > 2.0, "six controls bend the path");
+  near(bezierCurve.states().front().pose.x, 0.0, 1e-12, "Bezier start");
+  near(bezierCurve.states().back().pose.x, 2.0, 1e-12, "Bezier end");
+  bool reachesArch = false;
+  for (const auto& state : bezierCurve.states()) {
+    reachesArch |= state.pose.y > 0.65;
+    expect(std::isfinite(state.time) && std::isfinite(state.curvature), "Bezier states are finite");
+    expect(std::abs(state.velocity) <= config.maxVelocity + 1e-9, "Bezier respects speed limit");
+    expect(std::abs(state.velocity * state.velocity * state.curvature) <= config.maxCentripetalAcceleration + 1e-9, "Bezier respects centripetal limit");
+  }
+  expect(reachesArch, "six-control Bernstein arch evaluated");
+  near(bezierCurve.states()[bezierCurve.states().size()/2].pose.y,
+       0.765625, 0.001, "six-control curve agrees with Bernstein midpoint");
+  const auto repeatedControls = generateTrajectory(
+      {{{0,0,0}, 0, true, {{0,0,0}, {0,2,0}}}, {{0,2,0}, 0}}, config);
+  near(repeatedControls.states().front().pose.theta, kPi/2, 1e-9,
+       "repeated starting control keeps vertical tangent");
+  near(repeatedControls.states().back().pose.theta, kPi/2, 1e-9,
+       "repeated ending control keeps vertical tangent");
+  auto backwardsConfig = config; backwardsConfig.reversed = true;
+  const auto backwardsBezier = generateTrajectory(bezierWaypoints, backwardsConfig);
+  near(backwardsBezier.length(), bezierCurve.length(), 1e-12, "reverse drive retains Bezier geometry");
+  expect(backwardsBezier.states()[1].velocity < 0, "Bezier supports reverse drive");
+  const auto reversedBezier = reverseWaypoints(bezierWaypoints);
+  expect(reversedBezier[0].bezierToNext && reversedBezier[0].controlPoints.size() == 6, "reverse transfers outgoing controls");
+  near(reversedBezier[0].controlPoints.front().x, 1.8, 1e-12, "reverse reorders controls");
+  near(generateTrajectory(reversedBezier, config).length(), bezierCurve.length(), 1e-9, "reverse order preserves shape");
+  const auto mirroredBezier = mirrorWaypoints(bezierWaypoints, FieldMirror::kLeftRight, {2,2});
+  near(mirroredBezier[0].controlPoints.front().x, 1.8, 1e-12, "mirror transforms controls");
+  near(generateTrajectory(mirroredBezier, config).length(), bezierCurve.length(), 1e-9, "mirror preserves length");
+  auto cornerPath = bezierWaypoints;
+  cornerPath[0].controlPoints.clear(); cornerPath[1].bezierToNext = true;
+  cornerPath.push_back({{2,2,0}, 1.0});
+  const auto cornerTrajectory = generateTrajectory(cornerPath, config);
+  for (const auto& state : cornerTrajectory.states()) {
+    if (std::abs(state.pose.x-2) < 1e-9 && std::abs(state.pose.y) < 1e-9)
+      near(state.velocity, 0, 1e-12, "stops at independently authored segment join");
+  }
+
   const Trajectory straight = generateTrajectory(
       {{{0, 0, 0}}, {{2, 0, 0}}}, config);
   expect(!straight.empty(), "straight trajectory generated");

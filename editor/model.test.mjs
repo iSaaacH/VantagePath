@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { FIELD_SIZE, cornerToGps, cppExport, directionRuns, estimateLength, makeDocument, mirrorWaypoint, motionProfile, profileDistance, quinticPoint, reverseWaypoints, validateDocument, wrapRadians } from "./model.js";
+import { bezierPoint, segmentPoint, setControlCount, FIELD_SIZE, cornerToGps, cppExport, directionRuns, estimateLength, makeDocument, mirrorWaypoint, motionProfile, profileDistance, quinticPoint, reverseWaypoints, validateDocument, wrapRadians } from "./model.js";
 
 assert.equal(FIELD_SIZE, 144, "the playable floor is exactly 144 inches");
 assert.deepEqual(
@@ -54,3 +54,23 @@ const legacy = makeDocument(); delete legacy.robot; delete legacy.paths[0].segme
 assert.equal(validateDocument(legacy).robot.length, 18);
 assert.deepEqual(validateDocument(legacy).paths[0].segmentReversed, [true, true], "legacy route direction migrates to every segment");
 console.log("All VantagePath Studio model tests passed");
+
+const bezierDoc = makeDocument();
+const route = bezierDoc.paths[0];
+setControlCount(route, 0, 0);
+assert.deepEqual(segmentPoint(route, 0, 0.5), {x:43, y:34}, "zero controls produces the straight midpoint regardless of headings");
+setControlCount(route, 0, 6);
+assert.equal(route.controlPoints[0].length, 6);
+route.controlPoints[0][2].y = 100;
+const middle = segmentPoint(route, 0, 0.5);
+assert.ok(middle.y > 34, "six controls affect the actual geometry");
+assert.deepEqual(segmentPoint(route, 0, 0), {x:18, y:18});
+assert.deepEqual(segmentPoint(route, 0, 1), {x:68, y:50});
+assert.deepEqual(bezierPoint([{x:0,y:0},{x:1,y:2},{x:2,y:0}], 0.5), {x:1,y:1});
+assert.deepEqual(validateDocument(JSON.parse(JSON.stringify(bezierDoc))).paths[0].controlPoints, route.controlPoints);
+assert.match(cppExport(bezierDoc, "curve"), /true, \{\{25\.1429/);
+assert.match(cppExport(bezierDoc, "curve", "gps"), /control = vantage::vexGpsToCorner/);
+const oldDoc = makeDocument(); delete oldDoc.paths[0].controlPoints;
+assert.deepEqual(validateDocument(oldDoc).paths[0].controlPoints, [null, null], "old files retain Hermite geometry");
+route.controlPoints[0][0].x = NaN;
+assert.throws(() => validateDocument(bezierDoc), /Control coordinates/);

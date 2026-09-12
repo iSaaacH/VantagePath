@@ -36,7 +36,10 @@
       <section class="editor-grid">
         <aside class="rail path-rail">
           <div class="rail-heading"><div><span class="section-index">01 / Routes</span><h2>Paths</h2></div><button class="square-button" data-action="new-path" aria-label="Add path">+</button></div>
+          <div class="route-toolbar"><span id="route-count"></span><button data-action="duplicate-path">Duplicate</button></div>
           <div id="path-list" class="path-list"></div>
+          <section class="inspector-section route-settings"><label for="route-name">Route name</label><input id="route-name" /></section>
+          <section class="inspector-section segment-list-section"><div class="section-label"><span>Route segments</span></div><div id="segment-list" class="segment-list"></div></section>
           <div class="rail-note"><span>Corner coordinate model</span><p>The canvas is authored from the bottom-left. GPS export converts to VEX’s official centre origin and compass heading.</p></div>
         </aside>
 
@@ -57,11 +60,11 @@
             <svg id="field" viewBox="-9 -9 162 162" role="img" aria-label="Interactive VEX Override field path editor"></svg>
             <div class="axis axis-x">X → 144″</div><div class="axis axis-y">Y → 144″</div>
             <div class="coordinate-readout" id="coordinate-readout">X 0.0 · Y 0.0</div>
-            <div class="canvas-help">Double-click to add · drag anchors and acid control handles · Shift bypasses snap</div>
+            <div class="canvas-help">Double-click to add · drag anchors and control points · Shift bypasses snap</div>
             <div class="field-credit">Orthographic field by <a href="https://field-rendering.jerryio.com/" target="_blank" rel="noopener">Jerry Lum</a> · CC BY 4.0 · exact 144″ floor crop</div>
           </div>
           <div class="timeline">
-            <div><span class="section-index">03 / Trajectory</span><strong id="path-summary">3 anchors · 0.0 in</strong></div>
+            <div><span class="section-index">03 / Preview · estimated</span><strong id="path-summary">3 anchors · 0.0 in</strong></div>
             <div class="playback-controls">
               <button id="play-path" class="play-button" data-action="play-path" aria-label="Play full path">▶</button>
               <label class="scrubber-label" for="path-scrubber"><span class="visually-hidden">Path playback position</span><input id="path-scrubber" type="range" min="0" max="1000" value="0" /></label>
@@ -74,18 +77,31 @@
         <aside class="rail inspector-rail">
           <div class="rail-heading"><div><span class="section-index">02 / Controls</span><h2>Inspector</h2></div><span id="selection-index">P01</span></div>
 
+          <section class="inspector-section curve-section">
+            <div class="section-label"><span>Segment geometry</span></div>
+            <label class="stacked-label" for="segment-select">Editing segment</label><select id="segment-select"></select>
+            <label class="stacked-label" for="geometry-mode">Curve type</label><select id="geometry-mode"><option value="bezier">Bézier · editable control points</option><option value="hermite">Legacy · heading and tangent</option></select>
+            <label class="stacked-label" for="segment-direction">Drive direction</label><select id="segment-direction"><option value="false">Forward</option><option value="true">Reverse</option></select>
+            <div class="control-toolbar"><label for="control-count">Control points</label><input id="control-count" type="number" min="0" step="1" value="0" /><button data-action="add-control">+ Add</button></div>
+            <p id="control-help" class="control-help"></p>
+            <div class="control-column-labels" aria-hidden="true"><span>Point</span><span>X / in</span><span>Y / in</span><span></span></div>
+            <div id="control-panel"></div>
+          </section>
+
+          <details class="settings-group"><summary>Field & alliance</summary>
           <section class="inspector-section alliance-section">
             <div class="section-label"><span>Alliance view</span><small>highlights alliance quadrants</small></div>
             <div class="segmented"><button data-alliance="red" class="is-active"><i class="red-dot"></i>Red</button><button data-alliance="blue"><i class="blue-dot"></i>Blue</button><button data-alliance="skills">Skills</button></div>
           </section>
 
+          </details>
           <section class="inspector-section" id="waypoint-inspector">
             <div class="section-label"><span>Selected waypoint</span><small id="waypoint-label">Anchor 01</small></div>
             <div class="field-pair">
               <label><span>X / in</span><input id="point-x" type="number" min="0" max="144" step="0.1" /></label>
               <label><span>Y / in</span><input id="point-y" type="number" min="0" max="144" step="0.1" /></label>
             </div>
-            <div class="field-pair">
+            <div class="field-pair" id="heading-fields">
               <label><span>Heading / °</span><input id="point-heading" type="number" step="1" /></label>
               <label><span>Tangent / in</span><input id="point-tangent" type="number" min="1" step="1" /></label>
             </div>
@@ -97,11 +113,9 @@
             <div id="waypoint-list" class="waypoint-list"></div>
           </section>
 
-          <section class="inspector-section segment-list-section">
-            <div class="section-label"><span>Segment drive direction</span><small>independent per section</small></div>
-            <div id="segment-list" class="segment-list"></div>
-          </section>
 
+
+          <details class="settings-group"><summary>Robot setup</summary>
           <section class="inspector-section robot-section">
             <div class="section-label"><span>Robot setup</span><small>in · in/s · in/s²</small></div>
             <div class="field-pair">
@@ -128,7 +142,9 @@
               </div>
             </details>
           </section>
+          </details>
 
+          <details class="settings-group"><summary>Mirror & reverse</summary>
           <section class="inspector-section mirror-section">
             <div class="section-label"><span>Mirror path</span><small>all actions are undoable</small></div>
             <div class="mirror-grid">
@@ -138,12 +154,15 @@
             </div>
             <button class="reverse-order" data-action="reverse-order"><span>Reverse path order</span><b>⇄</b></button>
           </section>
+          </details>
 
+          <details class="settings-group"><summary>Export settings</summary>
           <section class="inspector-section export-settings">
             <div class="section-label"><span>Code export</span><small>VantagePath C++17</small></div>
             <label><span>Coordinate frame</span><select id="export-frame"><option value="corner">Corner origin · inches</option><option value="gps">Official VEX GPS · metres</option></select></label>
             <label><span>Variable name</span><input id="variable-name" value="competitionAuto" pattern="[A-Za-z_][A-Za-z0-9_]*" /></label>
           </section>
+          </details>
 
           <button class="danger-action" data-action="delete-path">Delete active path</button>
         </aside>

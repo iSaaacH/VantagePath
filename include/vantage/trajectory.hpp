@@ -10,6 +10,11 @@ namespace vantage {
 struct Waypoint {
   Pose2d pose;
   double tangentScale = 0.0;  // 0 chooses a distance-based tangent.
+  // Optional Bézier geometry to the next waypoint. No controls = straight line.
+  // Control poses use x/y only; heading follows the curve's tangent.
+  bool bezierToNext = false;
+  std::vector<Pose2d> controlPoints;
+
 };
 
 struct DriveFeedforwardConstraint {
@@ -61,8 +66,9 @@ class Trajectory {
   std::vector<TrajectoryState> states_;
 };
 
-// C2-continuous quintic Hermite geometry plus forward/backward time
-// parameterization. Throws std::invalid_argument for unsafe configuration.
+// Quintic Hermite or arbitrary-degree Bezier geometry plus forward/backward
+// time parameterization. Stops at joins involving Bezier segments.
+// Throws std::invalid_argument for unsafe configuration.
 Trajectory generateTrajectory(const std::vector<Waypoint>& waypoints,
                               const TrajectoryConfig& config);
 
