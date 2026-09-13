@@ -34,3 +34,23 @@ Switching curve types resets that segment's controls; Undo restores them.
 Controls persist in autosave and `.vpath` files and follow mirror/reverse actions.
 C++ exports include the full control polygon, including GPS-frame conversion,
 and require the updated VantagePath library. Playback timing is an estimate.
+
+## Fine positioning and robot start
+
+Dragging now snaps to **¼ inch** by default. Select 1″ or 6″ in the toolbar if
+needed, hold **Shift** to bypass snapping, or hold **Alt** for movement at one
+fifth of the pointer speed. Grabbing the edge of a point preserves the cursor
+offset. Small blue diamonds labelled **C** shape the curve; white circles labelled
+**P** are route points the robot passes through. The field legend explains both.
+
+**Robot start** is a separate document setting with X, Y and facing inputs and a
+purple robot outline on the field. Drag its outline to move it. New routes begin
+at this position. Changing the start does not silently move existing routes;
+use **Set first route point to robot start** when you want to align one. Route
+mirroring, reversal and deletion leave robot start unchanged.
+
+Start placement is saved in `.vpath` files and autosave. Older documents initialize
+it from their first route point. C++ export includes a separate `…RobotStart`
+`Pose2d` for initializing localization; GPS export includes both the GPS pose
+and its conversion to the trajectory frame. Playback previews the selected route,
+while the purple outline remains at the document's initial placement.

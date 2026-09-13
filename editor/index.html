@@ -35,10 +35,20 @@
 
       <section class="editor-grid">
         <aside class="rail path-rail">
-          <div class="rail-heading"><div><span class="section-index">01 / Routes</span><h2>Paths</h2></div><button class="square-button" data-action="new-path" aria-label="Add path">+</button></div>
+          <section class="robot-start-section" id="robot-start-section" aria-labelledby="robot-start-title">
+            <div class="start-heading"><span class="start-symbol">↗</span><h2 id="robot-start-title">Robot start</h2><button data-action="select-start" aria-label="Select robot start on field">Select</button></div>
+            <p>Where the robot is placed before autonomous.</p>
+            <div class="field-pair">
+              <label><span>X / in</span><input id="start-x" data-start="x" type="number" min="0" max="144" step="0.25" /></label>
+              <label><span>Y / in</span><input id="start-y" data-start="y" type="number" min="0" max="144" step="0.25" /></label>
+            </div>
+            <label class="start-heading-input"><span>Facing / °</span><input id="start-heading" data-start="heading" type="number" step="1" /></label>
+            <small>0° right · 90° up. Drag the purple outline to move.</small>
+          </section>
+          <div class="rail-heading"><div><span class="section-index">01 / Routes</span><h2>Routes</h2></div><button class="square-button" data-action="new-path" aria-label="Add path">+</button></div>
           <div class="route-toolbar"><span id="route-count"></span><button data-action="duplicate-path">Duplicate</button></div>
           <div id="path-list" class="path-list"></div>
-          <section class="inspector-section route-settings"><label for="route-name">Route name</label><input id="route-name" /></section>
+          <section class="inspector-section route-settings"><label for="route-name">Route name</label><input id="route-name" /><button class="use-start" data-action="use-robot-start">Set first route point to robot start</button><small class="route-start-note">Robot start is separate. Moving it leaves existing routes in place.</small></section>
           <section class="inspector-section segment-list-section"><div class="section-label"><span>Route segments</span></div><div id="segment-list" class="segment-list"></div></section>
           <div class="rail-note"><span>Corner coordinate model</span><p>The canvas is authored from the bottom-left. GPS export converts to VEX’s official centre origin and compass heading.</p></div>
         </aside>
@@ -47,12 +57,13 @@
           <div class="canvas-toolbar">
             <div class="tool-group" aria-label="Edit tools">
               <button class="tool is-active" data-action="select-tool" title="Select (V)">↖ <span>Select</span></button>
-              <button class="tool" data-action="add-point" title="Add waypoint (A)">＋ <span>Point</span></button>
+              <button class="tool" data-action="add-point" title="Add route point (A)">＋ <span>Route point</span></button>
               <button class="tool" data-action="delete-point" title="Delete selected">− <span>Delete</span></button>
             </div>
             <div class="tool-group">
               <button data-action="undo" title="Undo">↶</button><button data-action="redo" title="Redo">↷</button>
-              <label class="compact-check"><input id="snap-toggle" type="checkbox" checked /><span>Snap 6″</span></label>
+              <label class="compact-check"><input id="snap-toggle" type="checkbox" checked /><span>Snap</span></label>
+              <select id="snap-step" aria-label="Snap distance"><option value="0.25">¼″</option><option value="1">1″</option><option value="6">6″</option></select>
               <label class="compact-check"><input id="zone-toggle" type="checkbox" checked /><span>Zones</span></label>
             </div>
           </div>
@@ -60,8 +71,13 @@
             <svg id="field" viewBox="-9 -9 162 162" role="img" aria-label="Interactive VEX Override field path editor"></svg>
             <div class="axis axis-x">X → 144″</div><div class="axis axis-y">Y → 144″</div>
             <div class="coordinate-readout" id="coordinate-readout">X 0.0 · Y 0.0</div>
-            <div class="canvas-help">Double-click to add · drag anchors and control points · Shift bypasses snap</div>
+            <div class="canvas-help">Alt: ⅕-speed drag · Shift: no snap · Double-click: add route point</div>
             <div class="field-credit">Orthographic field by <a href="https://field-rendering.jerryio.com/" target="_blank" rel="noopener">Jerry Lum</a> · CC BY 4.0 · exact 144″ floor crop</div>
+          </div>
+          <div class="point-legend" aria-label="Field marker guide">
+            <span><i class="legend-point"></i><b>P · Route point</b> Robot passes through</span>
+            <span><i class="legend-control"></i><b>C · Control point</b> Bends the curve</span>
+            <span><i class="legend-start"></i><b>Robot start</b> Initial placement</span>
           </div>
           <div class="timeline">
             <div><span class="section-index">03 / Preview · estimated</span><strong id="path-summary">3 anchors · 0.0 in</strong></div>
@@ -82,6 +98,7 @@
             <label class="stacked-label" for="segment-select">Editing segment</label><select id="segment-select"></select>
             <label class="stacked-label" for="geometry-mode">Curve type</label><select id="geometry-mode"><option value="bezier">Bézier · editable control points</option><option value="hermite">Legacy · heading and tangent</option></select>
             <label class="stacked-label" for="segment-direction">Drive direction</label><select id="segment-direction"><option value="false">Forward</option><option value="true">Reverse</option></select>
+            <p class="point-explainer"><i class="legend-control"></i> Blue diamonds bend the curve. They are not destinations the robot drives through.</p>
             <div class="control-toolbar"><label for="control-count">Control points</label><input id="control-count" type="number" min="0" step="1" value="0" /><button data-action="add-control">+ Add</button></div>
             <p id="control-help" class="control-help"></p>
             <div class="control-column-labels" aria-hidden="true"><span>Point</span><span>X / in</span><span>Y / in</span><span></span></div>
@@ -96,7 +113,7 @@
 
           </details>
           <section class="inspector-section" id="waypoint-inspector">
-            <div class="section-label"><span>Selected waypoint</span><small id="waypoint-label">Anchor 01</small></div>
+            <div class="section-label"><span>Selected route point</span><small id="waypoint-label">Route point P1</small></div>
             <div class="field-pair">
               <label><span>X / in</span><input id="point-x" type="number" min="0" max="144" step="0.1" /></label>
               <label><span>Y / in</span><input id="point-y" type="number" min="0" max="144" step="0.1" /></label>
@@ -108,7 +125,7 @@
           </section>
 
           <section class="inspector-section waypoint-list-section">
-            <div class="section-label"><span>All waypoint coordinates</span><small id="waypoint-count">0 points</small></div>
+            <div class="section-label"><span>Route points · robot passes through</span><small id="waypoint-count">0 points</small></div>
             <div class="waypoint-list-heading" aria-hidden="true"><span>Point</span><span>X / in</span><span>Y / in</span></div>
             <div id="waypoint-list" class="waypoint-list"></div>
           </section>

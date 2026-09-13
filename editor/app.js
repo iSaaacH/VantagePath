@@ -1,4 +1,4 @@
-import { FIELD_SIZE, clamp, cppExport, estimateLength, makeDocument, mirrorWaypoint, motionProfile, normalizeSegmentDirections, profileDistance, segmentPoint, setControlCount, reverseWaypoints, validateDocument, wrapRadians } from "./model.js";
+import { dragPosition, FIELD_SIZE, clamp, cppExport, estimateLength, makeDocument, mirrorWaypoint, motionProfile, normalizeSegmentDirections, profileDistance, segmentPoint, setControlCount, reverseWaypoints, validateDocument, wrapRadians } from "./model.js";
 
 const STORAGE_KEY = "vantagepath-studio-v1";
 const svg = document.querySelector("#field");
@@ -9,6 +9,7 @@ const waypointList = document.querySelector("#waypoint-list");
 const controlPanel = document.querySelector("#control-panel");
 let selectedSegment = 0;
 let selectedControlId = null;
+let startSelected = false;
 const segmentList = document.querySelector("#segment-list");
 const toast = document.querySelector("#toast");
 const titleNode = document.querySelector("#document-title");
@@ -32,7 +33,7 @@ function activePath() { return documentState.paths.find((path) => path.id === ac
 function selectedPoint() { return activePath()?.waypoints.find((point) => point.id === selectedPointId) ?? null; }
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[character])); }
 function uid() { return crypto.randomUUID(); }
-function snap(value, bypass = false) { return documentState.snap && !bypass ? Math.round(value / 6) * 6 : value; }
+function snap(value, bypass = false) { return documentState.snap && !bypass ? Math.round(value / documentState.snapStep) * documentState.snapStep : value; }
 
 function loadLocal() {
   try { return validateDocument(JSON.parse(localStorage.getItem(STORAGE_KEY))) } catch { return makeDocument(); }
@@ -112,6 +113,7 @@ function updatePlaybackUi() {
   button.setAttribute("aria-label", playback.playing ? "Pause path" : "Play full path");
   const pose = poseAtDistance(samples, profileDistance(profile, playback.time), activePath());
   const robot = document.querySelector("#playback-robot");
+  if (robot) robot.style.display = playback.playing || playback.time > 0 ? "" : "none";
   if (pose && robot) robot.setAttribute("transform", `translate(${pose.x} ${FIELD_SIZE - pose.y}) rotate(${-pose.heading * 180 / Math.PI})`);
 }
 
@@ -143,7 +145,7 @@ function togglePlayback() {
 
 function restore(index) {
   if (index < 0 || index >= history.length) return;
-  selectedControlId = null;
+  selectedControlId = null; startSelected = false;
   stopPlayback(true);
   historyIndex = index;
   documentState = JSON.parse(history[index]);
@@ -190,17 +192,17 @@ function pathMarkup(path) {
   const bezierControls = (path.controlPoints ?? []).map((items, segment) => {
     if (!items || segment !== selectedSegment) return "";
     const polygon = [path.waypoints[segment], ...items, path.waypoints[segment + 1]];
-    return `<polyline class="control-line" fill="none" points="${polygon.map(p => `${p.x},${FIELD_SIZE-p.y}`).join(" ")}"/>` + items.map((p, i) => `<circle class="handle ${p.id === selectedControlId ? "selected" : ""}" data-control-id="${p.id}" cx="${p.x}" cy="${FIELD_SIZE-p.y}" r="2.2"/><text class="anchor-label" x="${p.x+3}" y="${FIELD_SIZE-p.y-3}">C${i+1}</text>`).join("");
+    return `<polyline class="control-line bezier-guide" fill="none" points="${polygon.map(p => `${p.x},${FIELD_SIZE-p.y}`).join(" ")}"/>` + items.map((p, i) => `<g class="control-marker ${p.id === selectedControlId ? "selected" : ""}" data-control-id="${p.id}" transform="translate(${p.x} ${FIELD_SIZE-p.y})"><title>Control point C${i+1}: bends the curve</title><circle class="marker-hit" r="3"/><path class="control-diamond" d="M0 -1.6 1.6 0 0 1.6 -1.6 0Z"/><text class="anchor-label control-label" x="2.5" y="-2.5">C${i+1}</text></g>`).join("");
   }).join("");
   const controls = path.waypoints.map((point, index) => {
     const handleX = point.x + Math.cos(point.heading) * point.tangent / 5;
     const handleY = point.y + Math.sin(point.heading) * point.tangent / 5;
-    const selected = point.id === selectedPointId;
+    const selected = !startSelected && !selectedControlId && point.id === selectedPointId;
     const legacy = (index > 0 && path.controlPoints[index-1] === null) || (index < path.waypoints.length-1 && path.controlPoints[index] === null);
     return `<g>${legacy ? `<line class="control-line" x1="${point.x}" y1="${FIELD_SIZE - point.y}" x2="${handleX}" y2="${FIELD_SIZE - handleY}"/>
       <circle class="handle" data-handle-id="${point.id}" cx="${handleX}" cy="${FIELD_SIZE - handleY}" r="2"/>` : ""}
-      <circle class="anchor ${selected ? "selected" : ""}" data-point-id="${point.id}" cx="${point.x}" cy="${FIELD_SIZE - point.y}" r="2.8"/>
-      <text class="anchor-label" x="${point.x + 3.8}" y="${FIELD_SIZE - point.y - 3}">${String(index + 1).padStart(2,"0")}</text></g>`;
+      <circle class="anchor ${selected ? "selected" : ""}" data-point-id="${point.id}" cx="${point.x}" cy="${FIELD_SIZE - point.y}" r="2.1"/>
+      <text class="anchor-label" x="${point.x + 3.8}" y="${FIELD_SIZE - point.y - 3}">P${index + 1}</text></g>`;
   }).join("");
   const robot = documentState.robot;
   const robotMarkup = `<g id="playback-robot" transform="translate(${path.waypoints[0].x} ${FIELD_SIZE - path.waypoints[0].y}) rotate(${-path.waypoints[0].heading * 180 / Math.PI})">
@@ -210,11 +212,24 @@ function pathMarkup(path) {
   return `${curves.join("")}${bezierControls}${controls}${robotMarkup}`;
 }
 
+function robotStartMarkup() {
+  const start = documentState.robotStart, robot = documentState.robot;
+  return `<g class="robot-start ${startSelected ? "is-selected" : ""}" transform="translate(${start.x} ${FIELD_SIZE-start.y})">
+    <g transform="rotate(${-start.heading*180/Math.PI})">
+      <rect class="start-outline" data-start-marker="true" x="${-robot.length/2}" y="${-robot.width/2}" width="${robot.length}" height="${robot.width}" rx="1"/>
+      <path class="start-arrow" data-start-marker="true" d="M0 0H${robot.length*.36}m-2 -1.5 2 1.5-2 1.5"/>
+    </g>
+    <text class="anchor-label start-label" x="${-robot.length/2}" y="${-robot.width/2-2}">ROBOT START</text>
+  </g>`;
+}
+
 function render() {
   const path = activePath();
   if (path) normalizeSegmentDirections(path);
   selectedSegment = Math.max(0, Math.min(selectedSegment, (path?.waypoints.length ?? 1)-2));
-  svg.innerHTML = fieldMarkup() + pathMarkup(path);
+  svg.innerHTML = fieldMarkup() + robotStartMarkup() + pathMarkup(path);
+  document.querySelectorAll("[data-start]").forEach(input => { const key = input.dataset.start; input.value = (key === "heading" ? documentState.robotStart.heading * 180 / Math.PI : documentState.robotStart[key]).toFixed(2); });
+  document.querySelector("#robot-start-section").classList.toggle("is-selected", startSelected);
   titleNode.textContent = documentState.title;
   pathList.innerHTML = documentState.paths.map((item, index) => `<div class="path-item ${item.id === activePathId ? "is-active" : ""}">
     <button class="path-select" data-path-id="${item.id}" aria-label="Edit ${escapeHtml(item.name)}"><i class="path-swatch" style="background:${escapeHtml(item.color)}"></i><span><strong>${escapeHtml(item.name)}</strong><small>${Math.max(0,item.waypoints.length-1)} segments · ${(item.controlPoints ?? []).flat().filter(Boolean).length} controls</small></span><b>${String(index + 1).padStart(2,"0")}</b></button>
@@ -225,20 +240,23 @@ function render() {
   document.querySelector("#route-count").textContent = `${documentState.paths.length} routes`;
   renderControls(path);
   const point = selectedPoint();
+  document.querySelector("#waypoint-inspector").hidden = startSelected || Boolean(selectedControlId);
   document.querySelector("#waypoint-inspector").style.opacity = point ? "1" : ".4";
   Object.values(pointInputs).forEach((input) => { input.disabled = !point; });
   if (point) {
-    pointInputs.x.value = point.x.toFixed(1); pointInputs.y.value = point.y.toFixed(1);
+    pointInputs.x.value = point.x.toFixed(2); pointInputs.y.value = point.y.toFixed(2);
     pointInputs.heading.value = (point.heading * 180 / Math.PI).toFixed(1); pointInputs.tangent.value = point.tangent.toFixed(1);
     const index = path.waypoints.findIndex((candidate) => candidate.id === point.id);
-    document.querySelector("#waypoint-label").textContent = `Anchor ${String(index + 1).padStart(2,"0")}`;
+    document.querySelector("#waypoint-label").textContent = `Route point P${index+1}`;
     document.querySelector("#selection-index").textContent = `P${String(index + 1).padStart(2,"0")}`;
   }
+  if (selectedControlId) document.querySelector("#selection-index").textContent = `Control C${(path?.controlPoints[selectedSegment] ?? []).findIndex(p => p.id === selectedControlId)+1}`;
+  if (startSelected) document.querySelector("#selection-index").textContent = "Robot start";
   document.querySelector("#waypoint-count").textContent = `${path?.waypoints.length ?? 0} ${(path?.waypoints.length ?? 0) === 1 ? "point" : "points"}`;
   waypointList.innerHTML = (path?.waypoints ?? []).map((item, index) => `<div class="waypoint-row ${item.id === selectedPointId ? "is-selected" : ""}">
     <button class="waypoint-select" data-select-point-id="${item.id}" aria-label="Select anchor ${index + 1}">P${String(index + 1).padStart(2,"0")}</button>
-    <label><span class="visually-hidden">Anchor ${index + 1} X coordinate in inches</span><input data-coordinate-point-id="${item.id}" data-coordinate="x" type="number" min="0" max="144" step="0.1" value="${item.x.toFixed(1)}" /></label>
-    <label><span class="visually-hidden">Anchor ${index + 1} Y coordinate in inches</span><input data-coordinate-point-id="${item.id}" data-coordinate="y" type="number" min="0" max="144" step="0.1" value="${item.y.toFixed(1)}" /></label>
+    <label><span class="visually-hidden">Anchor ${index + 1} X coordinate in inches</span><input data-coordinate-point-id="${item.id}" data-coordinate="x" type="number" min="0" max="144" step="0.25" value="${item.x.toFixed(2)}" /></label>
+    <label><span class="visually-hidden">Anchor ${index + 1} Y coordinate in inches</span><input data-coordinate-point-id="${item.id}" data-coordinate="y" type="number" min="0" max="144" step="0.25" value="${item.y.toFixed(2)}" /></label>
   </div>`).join("");
   segmentList.innerHTML = (path?.segmentReversed ?? []).map((reversed, index) => `<button class="segment-direction ${index === selectedSegment ? "is-current" : ""}" data-segment-index="${index}" aria-pressed="${index === selectedSegment}">
     <span><b>P${index+1} → P${index+2}</b><small>${path.controlPoints[index] === null ? "Legacy spline" : `${path.controlPoints[index].length} controls`}</small></span><strong>${reversed ? "Reverse" : "Forward"}</strong>
@@ -246,6 +264,7 @@ function render() {
   document.querySelector("#path-summary").textContent = `${path?.waypoints.length ?? 0} anchors · ${estimateLength(path?.waypoints ?? [], 24, path?.segmentReversed ?? [], path?.controlPoints ?? []).toFixed(1)} in`;
   const directions = path?.segmentReversed ?? [];
   document.querySelector("#direction-summary").textContent = directions.some(Boolean) ? (directions.every(Boolean) ? "All reverse" : "Mixed") : "All forward";
+  document.querySelector("#snap-step").value = String(documentState.snapStep);
   document.querySelector("#snap-toggle").checked = documentState.snap;
   document.querySelector("#zone-toggle").checked = documentState.showZones;
   robotInputs.forEach((input) => { input.value = Number(documentState.robot[input.dataset.robot]).toFixed(1); });
@@ -268,11 +287,11 @@ function renderControls(path) {
   document.querySelector("#control-count").value = controls?.length ?? 0;
   document.querySelector("#control-count").disabled = !segments.length || legacy;
   document.querySelector('[data-action="add-control"]').disabled = !segments.length;
-  document.querySelector("#control-help").textContent = !segments.length ? "Add two anchors to create a segment." : legacy ? "Saved spline geometry. Choose Bézier to edit individual control points." : controls.length ? "Drag C handles on the field or edit their coordinates below." : "Straight line between anchors. Add control points to bend it.";
+  document.querySelector("#control-help").textContent = !segments.length ? "Add two route points to create a segment." : legacy ? "Saved spline geometry. Choose Bézier to edit individual control points." : controls.length ? "Drag a blue C diamond, or edit its X / Y below." : "Straight line between route points. Add control points to bend it.";
   controlPanel.innerHTML = (controls ?? []).map((point, i) => `<div class="control-row ${point.id === selectedControlId ? "is-selected" : ""}">
     <button data-select-control="${point.id}" aria-label="Select control point ${i+1}">C${i+1}</button>
-    <label><span class="visually-hidden">Control ${i+1} X</span><input type="number" min="0" max="144" step="0.1" data-control-coordinate="x" data-control-index="${i}" value="${point.x.toFixed(1)}" /></label>
-    <label><span class="visually-hidden">Control ${i+1} Y</span><input type="number" min="0" max="144" step="0.1" data-control-coordinate="y" data-control-index="${i}" value="${point.y.toFixed(1)}" /></label>
+    <label><span class="visually-hidden">Control ${i+1} X</span><input type="number" min="0" max="144" step="0.1" data-control-coordinate="x" data-control-index="${i}" value="${point.x.toFixed(2)}" /></label>
+    <label><span class="visually-hidden">Control ${i+1} Y</span><input type="number" min="0" max="144" step="0.1" data-control-coordinate="y" data-control-index="${i}" value="${point.y.toFixed(2)}" /></label>
     <button data-remove-control="${i}" aria-label="Remove control point ${i+1}">×</button>
   </div>`).join("");
   const pointIndex = path?.waypoints.findIndex(p => p.id === selectedPointId) ?? -1;
@@ -283,7 +302,7 @@ function renderControls(path) {
 document.querySelector("#route-name").addEventListener("change", event => {
   if (activePath()) { activePath().name = event.target.value.trim() || "Untitled route"; commit("Route renamed"); }
 });
-document.querySelector("#segment-select").addEventListener("change", event => { selectedSegment = Number(event.target.value); selectedControlId = null; render(); });
+document.querySelector("#segment-select").addEventListener("change", event => { startSelected = false; selectedSegment = Number(event.target.value); selectedControlId = null; render(); });
 document.querySelector("#segment-direction").addEventListener("change", event => {
   activePath().segmentReversed[selectedSegment] = event.target.value === "true"; commit("Drive direction updated");
 });
@@ -295,11 +314,13 @@ document.querySelector("#geometry-mode").addEventListener("change", event => {
 document.querySelector("#control-count").addEventListener("change", event => {
   const count = Number(event.target.value);
   if (!event.target.value || !Number.isInteger(count) || count < 0) return render();
+  startSelected = false;
   setControlCount(activePath(), selectedSegment, count); selectedControlId = null; commit("Control point count updated");
 });
 controlPanel.addEventListener("change", event => {
   const input = event.target.closest("[data-control-coordinate]"); if (!input) return;
   const value = Number(input.value); if (!input.value || !Number.isFinite(value)) return render();
+  startSelected = false;
   const point = activePath().controlPoints[selectedSegment][Number(input.dataset.controlIndex)];
   point[input.dataset.controlCoordinate] = clamp(value); selectedControlId = point.id; commit("Control point updated");
 });
@@ -313,7 +334,7 @@ function svgCoordinates(event) {
 function addPoint(at = { x: 72, y: 72 }) {
   const path = activePath();
   if (!path) return;
-  selectedControlId = null;
+  startSelected = false; selectedControlId = null;
   const previous = path.waypoints.at(-1);
   const heading = previous ? Math.atan2(at.y - previous.y, at.x - previous.x) : 0;
   const point = { id: uid(), x: snap(at.x), y: snap(at.y), heading, tangent: previous ? Math.max(18, Math.hypot(at.x - previous.x, at.y - previous.y)) : 30 };
@@ -321,6 +342,7 @@ function addPoint(at = { x: 72, y: 72 }) {
 }
 
 function deletePoint() {
+  if (startSelected) return notify("Robot start is edited in its own section");
   const path = activePath();
   if (selectedControlId && path) {
     const items = path.controlPoints[selectedSegment];
@@ -353,7 +375,8 @@ function newPath() {
   selectedSegment = 0; selectedControlId = null;
   const number = documentState.paths.length + 1;
   const path = { id:uid(), name:`Route ${number}`, color:"#171715", segmentReversed:[false], controlPoints:[[]], waypoints:[
-    { id:uid(), x:18, y:18, heading:0, tangent:30 }, { id:uid(), x:54, y:24, heading:.2, tangent:30 }
+    { id:uid(), ...documentState.robotStart, tangent:30 },
+    { id:uid(), x:clamp(documentState.robotStart.x + (documentState.robotStart.x > 108 ? -36 : 36)), y:documentState.robotStart.y, heading:documentState.robotStart.heading, tangent:30 }
   ] };
   documentState.paths.push(path); activePathId = path.id; selectedPointId = path.waypoints[0].id; commit("New path created");
 }
@@ -367,6 +390,13 @@ function download(name, content, type) {
 function safeFileName(value) { return value.trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") || "vantage-path"; }
 
 function runAction(action) {
+  if (action === "select-start") { startSelected = true; selectedControlId = null; stopPlayback(true); render(); return; }
+  if (action === "use-robot-start") {
+    const point = activePath()?.waypoints[0]; if (!point) return notify("Add a route point first");
+    Object.assign(point, documentState.robotStart); startSelected = false; selectedControlId = null; selectedPointId = point.id;
+    return commit("First route point placed at robot start");
+  }
+  if (["new-path", "add-point", "add-control", "duplicate-path"].includes(action)) startSelected = false;
   if (action === "select-tool") { notify("Select tool active"); return; }
   if (action === "duplicate-path") {
     const original = activePath(); if (!original) return;
@@ -413,16 +443,16 @@ document.addEventListener("click", (event) => {
   const remove = event.target.closest("[data-remove-control]");
   if (remove) { activePath().controlPoints[selectedSegment].splice(Number(remove.dataset.removeControl),1); selectedControlId = null; commit("Control point removed"); }
   const control = event.target.closest("[data-select-control]");
-  if (control) { selectedControlId = control.dataset.selectControl; render(); }
+  if (control) { startSelected = false; selectedControlId = control.dataset.selectControl; render(); }
   const pathButton = event.target.closest("[data-path-id]");
-  if (pathButton) { stopPlayback(true); activePathId = pathButton.dataset.pathId; selectedSegment = 0; selectedControlId = null; selectedPointId = activePath()?.waypoints[0]?.id ?? null; render(); }
+  if (pathButton) { startSelected = false; stopPlayback(true); activePathId = pathButton.dataset.pathId; selectedSegment = 0; selectedControlId = null; selectedPointId = activePath()?.waypoints[0]?.id ?? null; render(); }
   const segmentButton = event.target.closest("[data-segment-index]");
   if (segmentButton) {
     const path = activePath(); const index = Number(segmentButton.dataset.segmentIndex);
-    if (path?.segmentReversed[index] !== undefined) { selectedSegment = index; selectedControlId = null; render(); }
+    if (path?.segmentReversed[index] !== undefined) { startSelected = false; selectedSegment = index; selectedControlId = null; render(); }
   }
   const pointButton = event.target.closest("[data-select-point-id]");
-  if (pointButton) { selectedControlId = null; selectedPointId = pointButton.dataset.selectPointId; stopPlayback(true); render(); }
+  if (pointButton) { startSelected = false; selectedControlId = null; selectedPointId = pointButton.dataset.selectPointId; stopPlayback(true); render(); }
   const alliance = event.target.closest("[data-alliance]")?.dataset.alliance;
   if (alliance) { documentState.alliance = alliance; commit(`${alliance[0].toUpperCase()+alliance.slice(1)} field view selected`); }
 });
@@ -433,41 +463,52 @@ waypointList.addEventListener("change", (event) => {
   const point = activePath()?.waypoints.find((item) => item.id === input.dataset.coordinatePointId);
   const value = Number(input.value);
   if (!point || !Number.isFinite(value)) return render();
+  startSelected = false;
   point[input.dataset.coordinate] = clamp(value);
   selectedControlId = null;
   selectedPointId = point.id;
   commit("Waypoint coordinates updated");
 });
 
-svg.addEventListener("pointerdown", (event) => {
-  const pointId = event.target.dataset.pointId;
-  const handleId = event.target.dataset.handleId;
-  const controlId = event.target.dataset.controlId;
-  if (controlId) {
-    stopPlayback(true); selectedControlId = controlId;
-    drag = { type:"control", pointId:controlId, pointerId:event.pointerId };
-    svg.setPointerCapture(event.pointerId); render(); event.preventDefault(); return;
-  }
-  if (!pointId && !handleId) return;
+svg.addEventListener("pointerdown", event => {
+  const target = event.target.closest("[data-point-id],[data-handle-id],[data-control-id],[data-start-marker]");
+  if (!target) return;
   stopPlayback(true);
-  selectedControlId = null; selectedPointId = pointId ?? handleId;
-  drag = { type:pointId ? "point" : "handle", pointId:selectedPointId, pointerId:event.pointerId };
+  const { pointId, handleId, controlId, startMarker } = target.dataset;
+  startSelected = Boolean(startMarker); selectedControlId = controlId ?? null;
+  if (pointId || handleId) selectedPointId = pointId ?? handleId;
+  const point = startSelected ? documentState.robotStart : controlId
+    ? activePath().controlPoints[selectedSegment].find(p => p.id === controlId) : selectedPoint();
+  const type = startSelected ? "start" : controlId ? "control" : handleId ? "handle" : "point";
+  const origin = type === "handle" ? { x:point.x+Math.cos(point.heading)*point.tangent/5, y:point.y+Math.sin(point.heading)*point.tangent/5 } : { x:point.x, y:point.y };
+  drag = { type, point, pointerId:event.pointerId, pointerStart:svgCoordinates(event), origin, before:JSON.stringify(documentState) };
   svg.setPointerCapture(event.pointerId); render(); event.preventDefault();
 });
 
-svg.addEventListener("pointermove", (event) => {
+svg.addEventListener("pointermove", event => {
   const at = svgCoordinates(event);
-  document.querySelector("#coordinate-readout").textContent = `X ${at.x.toFixed(1)} · Y ${at.y.toFixed(1)}`;
-  if (!drag) return;
-  const point = drag.type === "control" ? activePath()?.controlPoints.flat().find(p => p?.id === drag.pointId) : activePath()?.waypoints.find((candidate) => candidate.id === drag.pointId); if (!point) return;
-  if (drag.type === "point" || drag.type === "control") { point.x = clamp(snap(at.x,event.shiftKey)); point.y = clamp(snap(at.y,event.shiftKey)); }
-  else { point.heading = wrapRadians(Math.atan2(at.y-point.y,at.x-point.x)); point.tangent = Math.max(3,Math.hypot(at.x-point.x,at.y-point.y)*5); }
+  document.querySelector("#coordinate-readout").textContent = `X ${at.x.toFixed(2)} · Y ${at.y.toFixed(2)}`;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  const step = documentState.snap && !event.shiftKey ? documentState.snapStep : 0;
+  const moved = dragPosition(drag.origin, drag.pointerStart, at, step, event.altKey);
+  const point = drag.point;
+  if (drag.type === "handle") {
+    point.heading = wrapRadians(Math.atan2(moved.y-point.y,moved.x-point.x));
+    point.tangent = Math.max(3,Math.hypot(moved.x-point.x,moved.y-point.y)*5);
+  } else { point.x = moved.x; point.y = moved.y; }
   render();
 });
 
-svg.addEventListener("pointerup", (event) => { if (drag?.pointerId === event.pointerId) { drag=null; commit("Path control updated"); } });
-svg.addEventListener("pointercancel", () => { drag=null; });
-svg.addEventListener("dblclick", (event) => { if (!event.target.closest("[data-point-id],[data-handle-id],[data-control-id]")) addPoint(svgCoordinates(event)); });
+svg.addEventListener("pointerup", event => {
+  if (drag?.pointerId !== event.pointerId) return;
+  const message = drag.type === "start" ? "Robot start updated" : drag.type === "control" ? "Control point updated" : "Route point updated";
+  drag = null; commit(message);
+});
+svg.addEventListener("pointercancel", () => {
+  if (!drag) return;
+  documentState = JSON.parse(drag.before); drag = null; render();
+});
+svg.addEventListener("dblclick", (event) => { if (!event.target.closest("[data-point-id],[data-handle-id],[data-control-id],[data-start-marker]")) addPoint(svgCoordinates(event)); });
 
 for (const [key,input] of Object.entries(pointInputs)) input.addEventListener("change", () => {
   const point=selectedPoint(); if(!point) return;
@@ -492,6 +533,14 @@ scrubber.addEventListener("input", () => {
   updatePlaybackUi();
 });
 
+document.querySelectorAll("[data-start]").forEach(input => input.addEventListener("change", () => {
+  const value = Number(input.value); if (!input.value || !Number.isFinite(value)) return render();
+  const key = input.dataset.start;
+  documentState.robotStart[key] = key === "heading" ? wrapRadians(value*Math.PI/180) : clamp(value);
+  startSelected = true; selectedControlId = null; commit("Robot start updated");
+}));
+document.querySelector("#snap-step").addEventListener("change", event => { documentState.snapStep = Number(event.target.value); commit(); });
+
 document.querySelector("#snap-toggle").addEventListener("change", (event) => { documentState.snap=event.target.checked;commit(); });
 document.querySelector("#zone-toggle").addEventListener("change", (event) => { documentState.showZones=event.target.checked;commit(); });
 titleNode.addEventListener("blur", () => { documentState.title=titleNode.textContent.trim() || "Untitled path";commit(); });
@@ -500,7 +549,7 @@ fileInput.addEventListener("change", async () => {
   try {
     if (!fileInput.files.length) return;
     const loaded=validateDocument(JSON.parse(await fileInput.files[0].text()));
-    stopPlayback(true); selectedSegment = 0; selectedControlId = null; documentState=loaded;
+    stopPlayback(true); selectedSegment = 0; selectedControlId = null; startSelected = false; documentState=loaded;
     activePathId=loaded.paths[0]?.id??null;selectedPointId=loaded.paths[0]?.waypoints[0]?.id??null;history=[JSON.stringify(loaded)];historyIndex=0;persist();render();notify("VantagePath file opened");
   } catch(error) { notify(error instanceof Error ? error.message : "Could not open that file"); }
   fileInput.value="";
