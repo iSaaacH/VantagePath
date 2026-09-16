@@ -158,6 +158,8 @@ int main() {
          "reverse trajectory has negative velocity");
   near(std::abs(reverse.states().front().pose.theta), vantage::kPi, 1e-9,
        "reverse trajectory faces opposite its geometric tangent");
+  expect(reverse.states().back().direction < 0.0,
+         "reverse trajectory preserves direction at stopped endpoint");
 
   DifferentialDriveKinematics kinematics(0.4);
   const WheelSpeeds wheels = kinematics.toWheelSpeeds({1.0, 2.0});
@@ -173,6 +175,20 @@ int main() {
   const ChassisSpeeds correction = controller.calculate({0, 0, 0}, reference);
   expect(correction.linear > 1.0, "controller corrects longitudinal lag");
   expect(correction.angular > 0.0, "controller steers toward positive lateral error");
+
+  TrajectoryState reverseReference;
+  reverseReference.pose = {0, 0.2, 0};
+  reverseReference.velocity = -1.0;
+  reverseReference.direction = -1.0;
+  const ChassisSpeeds reverseCorrection =
+      controller.calculate({0, 0, 0}, reverseReference);
+  expect(reverseCorrection.angular < 0.0,
+         "reverse controller preserves lateral correction sign");
+  reverseReference.velocity = 0.0;
+  const ChassisSpeeds stoppedReverseCorrection =
+      controller.calculate({0, 0, 0}, reverseReference);
+  expect(stoppedReverseCorrection.angular < 0.0,
+         "reverse direction survives a zero-speed endpoint");
 
   MotorFeedforward feedforward({0.2, 2.0, 0.5});
   near(feedforward.calculate(1.0, 2.0), 3.2, 1e-12,
@@ -224,6 +240,27 @@ int main() {
   expect(output.status == FollowerStatus::kRunning, "follower runs mid-path");
   expect(output.leftVoltage > 0 && output.rightVoltage > 0,
          "follower commands both wheels on straight path");
+
+  TrajectoryFollower invalidInputFollower(followerConfig);
+  invalidInputFollower.start(straight, 0.0);
+  const FollowerOutput invalidInput = invalidInputFollower.update(
+      0.1, {std::numeric_limits<double>::quiet_NaN(), 0, 0}, {}, 12.0);
+  expect(invalidInput.status == FollowerStatus::kDiverged,
+         "non-finite localization fails safe instead of commanding NaN voltage");
+
+  FollowerConfig isolatedConfig = followerConfig;
+  isolatedConfig.enablePoseFeedback = false;
+  isolatedConfig.enableVelocityFeedback = false;
+  TrajectoryFollower isolatedFollower(isolatedConfig);
+  isolatedFollower.start(straight, 0.0);
+  const FollowerOutput isolated = isolatedFollower.update(
+      straight.duration() * 0.5, {0, 1, 0}, {100, -100}, 12.0);
+  expect(!isolated.poseFeedbackActive && !isolated.velocityFeedbackActive,
+         "follower reports isolated feedback loops");
+  near(isolated.chassisSetpoint.linear, isolated.reference.velocity, 1e-12,
+       "disabled pose loop leaves reference linear speed unchanged");
+  near(isolated.leftFeedbackVoltage, 0.0, 1e-12,
+       "disabled wheel loop contributes no left feedback voltage");
 
   // Once a completed trajectory is inside every tolerance, the settle window
   // must observe the stopped robot without re-energising it. Otherwise the

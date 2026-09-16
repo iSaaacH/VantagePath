@@ -32,8 +32,8 @@ tip. A good controller cannot recover traction that the plan already demanded.
 
 ## 5. Tune pose feedback
 
-Keep damping around `0.7–0.9`. Raise `convergence` until injected 5–10 cm pose
-errors recover promptly. If it snakes on straights, reduce convergence or fix
+Keep `kd` around `0.7–0.9`. Raise `kp` until injected 5–10 cm pose
+errors recover promptly. If it snakes on straights, reduce `kp` or fix
 delayed/noisy localization. Keep heading tolerance realistic; demanding less
 than sensor noise guarantees dithering.
 

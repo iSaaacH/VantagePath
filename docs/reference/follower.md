@@ -21,6 +21,11 @@ voltage saturation, and explicit completion states.
 | `divergenceLimit` | `1.0` | Immediate abort distance |
 | `timeoutAfterTrajectory` | `1.0` | Extra time allowed to settle |
 | `settleCycles` | `8` | Consecutive valid ticks required |
+| `enablePoseFeedback` | `true` | Enable nonlinear full-pose correction |
+| `enableVelocityFeedback` | `true` | Enable left/right wheel PID correction |
+
+The two enable flags are commissioning aids. Disabling a loop does not disable
+the trajectory reference or motor feedforward.
 
 ## Lifecycle
 
@@ -40,7 +45,9 @@ PID controllers.
 
 ## Status and output
 
-`FollowerOutput` exposes voltages, wheel setpoints, pose error, status, and a
+`FollowerOutput` exposes the sampled trajectory state, pose error, corrected
+chassis and wheel setpoints, separate feedforward/feedback voltage
+contributions, loop time, voltage limit, controller-active flags, status, and a
 flag indicating coupled voltage saturation.
 
 | `FollowerStatus` | Meaning |
@@ -52,4 +59,3 @@ flag indicating coupled voltage saturation.
 | `kDiverged` | Position error exceeded `divergenceLimit` |
 
 Stop or brake the drive on every terminal status.
-

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -70,6 +71,17 @@ double distance(const Pose2d& a, const Pose2d& b) {
 }
 
 void validate(const TrajectoryConfig& c) {
+  const double values[] = {
+      c.maxVelocity, c.maxAcceleration, c.maxDeceleration,
+      c.maxCentripetalAcceleration, c.maxWheelVelocity, c.maxVoltage,
+      c.trackWidth, c.startVelocity, c.endVelocity, c.sampleDistance,
+      c.leftFeedforward.staticGain, c.leftFeedforward.velocityGain,
+      c.leftFeedforward.accelerationGain, c.rightFeedforward.staticGain,
+      c.rightFeedforward.velocityGain, c.rightFeedforward.accelerationGain};
+  if (std::any_of(std::begin(values), std::end(values),
+                  [](double value) { return !std::isfinite(value); })) {
+    throw std::invalid_argument("trajectory configuration must be finite");
+  }
   if (!(c.maxVelocity > 0.0 && c.maxAcceleration > 0.0 &&
         c.maxDeceleration > 0.0 && c.maxCentripetalAcceleration > 0.0 &&
         c.maxWheelVelocity > 0.0 && c.trackWidth > 0.0 &&
@@ -95,8 +107,14 @@ AccelerationBounds voltageAccelerationBounds(const Sample& sample, double speed,
   AccelerationBounds bounds{-config.maxDeceleration, config.maxAcceleration};
   if (!(config.maxVoltage > 0.0)) return bounds;
   const double halfTrack = config.trackWidth * 0.5;
-  const double factors[2] = {1.0 - sample.curvature * halfTrack,
-                             1.0 + sample.curvature * halfTrack};
+  // The time passes operate on positive geometric path speed. Convert that
+  // speed to signed physical wheel speeds here. On a reverse path this also
+  // swaps which physical side is the curve's inner/outer wheel; using the
+  // forward factors can violate voltage limits when the two sides have
+  // different feedforward constants.
+  const double direction = config.reversed ? -1.0 : 1.0;
+  const double factors[2] = {direction - sample.curvature * halfTrack,
+                             direction + sample.curvature * halfTrack};
   const double factorDerivatives[2] = {
       -sample.curvatureDerivative * halfTrack,
        sample.curvatureDerivative * halfTrack};
@@ -160,6 +178,7 @@ TrajectoryState Trajectory::sample(double time) const {
   out.acceleration = lower->acceleration +
                      (upper->acceleration - lower->acceleration) * u;
   out.angularVelocity = out.velocity * out.curvature;
+  out.direction = lower->direction;
   return out;
 }
 
@@ -176,6 +195,9 @@ Trajectory generateTrajectory(const std::vector<Waypoint>& waypoints,
     if (!std::isfinite(waypoints[i].pose.x) || !std::isfinite(waypoints[i].pose.y) ||
         !std::isfinite(waypoints[i].pose.theta) || !std::isfinite(waypoints[i].tangentScale)) {
       throw std::invalid_argument("waypoint values must be finite");
+    }
+    if (waypoints[i].tangentScale < 0.0) {
+      throw std::invalid_argument("waypoint tangent scale must be nonnegative");
     }
     if (waypoints[i].tangentScale > 0.0) {
       tangentScales[i] = waypoints[i].tangentScale;
@@ -301,6 +323,7 @@ Trajectory generateTrajectory(const std::vector<Waypoint>& waypoints,
     states[i].curvature = direction * samples[i].curvature;
     states[i].velocity = direction * velocity[i];
     states[i].angularVelocity = states[i].velocity * states[i].curvature;
+    states[i].direction = direction;
     if (i > 0) {
       const double ds = samples[i].distance - samples[i - 1].distance;
       const double sum = velocity[i] + velocity[i - 1];

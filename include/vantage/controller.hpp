@@ -26,8 +26,11 @@ class DifferentialDriveKinematics {
 };
 
 struct NonlinearControllerConfig {
-  double convergence = 2.0;  // b: position correction aggressiveness
-  double damping = 0.75;     // zeta: 0 < damping <= 1
+  // These are the only two feedback gains. The controller is Ramsete-style,
+  // not an independent axis PID: kp is the spatial convergence coefficient
+  // (traditionally "b") and kd is the damping ratio (traditionally "zeta").
+  double kp = 2.0;
+  double kd = 0.75;  // 0 < kd <= 1
   // Keeps terminal feedback controllable after reference velocity reaches 0.
   double minimumFeedbackSpeed = 0.10;
   double maxLinearCorrection = 0.75;
@@ -53,6 +56,9 @@ struct FeedforwardConfig {
   double staticGain = 0.0;
   double velocityGain = 1.0;
   double accelerationGain = 0.0;
+  // Fade static friction compensation in over this velocity magnitude.
+  // Zero preserves the original sign-based compensation.
+  double staticVelocityDeadband = 0.0;
 };
 
 class MotorFeedforward {

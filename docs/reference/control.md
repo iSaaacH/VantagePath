@@ -20,8 +20,8 @@ tracks the full timed pose while preserving reference velocity and curvature.
 
 | `NonlinearControllerConfig` field | Default | Meaning |
 | --- | ---: | --- |
-| `convergence` | `2.0` | Position correction aggressiveness |
-| `damping` | `0.75` | Damping ratio; must be in `(0, 1]` |
+| `kp` | `2.0` | Spatial convergence coefficient (Ramsete `b`) |
+| `kd` | `0.75` | Damping ratio (Ramsete `zeta`); must be in `(0, 1]` |
 | `minimumFeedbackSpeed` | `0.10` | Keeps terminal feedback controllable |
 | `maxLinearCorrection` | `0.75` | Linear feedback clamp |
 | `maxAngularCorrection` | `4.0` | Angular feedback clamp |
@@ -38,7 +38,9 @@ voltage = kS * sign(velocity) + kV * velocity + kA * acceleration
 ```
 
 Configure it with `FeedforwardConfig { staticGain, velocityGain,
-accelerationGain }` and call `calculate(velocity, acceleration)`.
+accelerationGain, staticVelocityDeadband }` and call
+`calculate(velocity, acceleration)`. A positive deadband fades the static term
+through zero instead of creating a full `-kS` to `+kS` step.
 
 ## Velocity PID
 
@@ -51,4 +53,3 @@ double correction = pid.calculate(
 ```
 
 It returns zero for non-positive `dt`. Call `reset()` before a new motion.
-

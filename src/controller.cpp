@@ -26,9 +26,16 @@ ChassisSpeeds DifferentialDriveKinematics::toChassisSpeeds(
 NonlinearPoseController::NonlinearPoseController(
     NonlinearControllerConfig config)
     : config_(config) {
-  if (!(config.convergence > 0.0) || !(config.damping > 0.0) ||
-      config.damping > 1.0 || config.minimumFeedbackSpeed < 0.0) {
-    throw std::invalid_argument("controller requires b > 0 and 0 < zeta <= 1");
+  if (!std::isfinite(config.kp) || !std::isfinite(config.kd) ||
+      !std::isfinite(config.minimumFeedbackSpeed) ||
+      !std::isfinite(config.maxLinearCorrection) ||
+      !std::isfinite(config.maxAngularCorrection) || !(config.kp > 0.0) ||
+      !(config.kd > 0.0) || config.kd > 1.0 ||
+      config.minimumFeedbackSpeed < 0.0 ||
+      config.maxLinearCorrection < 0.0 ||
+      config.maxAngularCorrection < 0.0) {
+    throw std::invalid_argument(
+        "controller requires finite kp > 0, 0 < kd <= 1 and nonnegative limits");
   }
 }
 
@@ -42,17 +49,23 @@ ChassisSpeeds NonlinearPoseController::calculate(
   const PoseError e = error(current, reference);
   const double vRef = reference.velocity;
   const double wRef = reference.angularVelocity;
+  // k uses speed magnitude, but the lateral term must retain drive direction.
+  // Dropping this sign makes reverse trajectories steer away from cross-track
+  // error. direction also keeps the sign at a stopped reverse endpoint.
+  const double direction = vRef < -1e-9 ? -1.0 : vRef > 1e-9 ? 1.0
+      : reference.direction < 0.0 ? -1.0 : 1.0;
   const double feedbackSpeed = std::max(std::abs(vRef),
                                         config_.minimumFeedbackSpeed);
-  const double k = 2.0 * config_.damping *
-                   std::sqrt(wRef * wRef + config_.convergence *
+  const double signedFeedbackSpeed = direction * feedbackSpeed;
+  const double k = 2.0 * config_.kd *
+                   std::sqrt(wRef * wRef + config_.kp *
                              feedbackSpeed * feedbackSpeed);
 
   const double linearCorrection = std::clamp(
       k * e.longitudinal, -config_.maxLinearCorrection,
       config_.maxLinearCorrection);
   const double angularCorrection = std::clamp(
-      k * e.heading + config_.convergence * feedbackSpeed *
+      k * e.heading + config_.kp * signedFeedbackSpeed *
           sinc(e.heading) * e.lateral,
       -config_.maxAngularCorrection, config_.maxAngularCorrection);
   return {vRef * std::cos(e.heading) + linearCorrection,
@@ -65,6 +78,9 @@ double MotorFeedforward::calculate(double velocity, double acceleration) const {
   double sign = 0.0;
   if (velocity > 1e-9) sign = 1.0;
   if (velocity < -1e-9) sign = -1.0;
+  if (config_.staticVelocityDeadband > 0.0) {
+    sign = std::clamp(velocity / config_.staticVelocityDeadband, -1.0, 1.0);
+  }
   return config_.staticGain * sign + config_.velocityGain * velocity +
          config_.accelerationGain * acceleration;
 }

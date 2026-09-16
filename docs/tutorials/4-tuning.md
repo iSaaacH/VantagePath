@@ -53,9 +53,9 @@ Start with a 6 V ceiling and approximately half measured free speed.
 
 ## 4. Tune pose feedback
 
-Keep damping between `0.7` and `0.9`. Increase `convergence` gradually while
+Keep `kd` between `0.7` and `0.9`. Increase `kp` gradually while
 starting the robot 5–10 cm away from the planned pose. If the robot snakes on a
-straight, reduce convergence and check localization delay/noise.
+straight, reduce `kp` and check localization delay/noise.
 
 The heading tolerance must be larger than measured stationary IMU noise.
 Otherwise the robot is mathematically prevented from settling.

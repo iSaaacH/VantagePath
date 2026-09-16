@@ -18,6 +18,10 @@ struct FollowerConfig {
   double divergenceLimit = 1.0;
   double timeoutAfterTrajectory = 1.0;
   unsigned settleCycles = 8;
+  // Isolation switches for commissioning. Feedforward always remains active;
+  // these independently enable the outer pose loop and inner wheel loop.
+  bool enablePoseFeedback = true;
+  bool enableVelocityFeedback = true;
 };
 
 enum class FollowerStatus { kIdle, kRunning, kSettled, kTimedOut, kDiverged };
@@ -27,8 +31,19 @@ struct FollowerOutput {
   double rightVoltage = 0.0;
   WheelSpeeds wheelSetpoint;
   PoseError poseError;
+  TrajectoryState reference;
+  ChassisSpeeds chassisSetpoint;
+  double leftFeedforwardVoltage = 0.0;
+  double rightFeedforwardVoltage = 0.0;
+  double leftFeedbackVoltage = 0.0;
+  double rightFeedbackVoltage = 0.0;
+  double elapsed = 0.0;
+  double dt = 0.0;
+  double voltageLimit = 0.0;
   FollowerStatus status = FollowerStatus::kIdle;
   bool saturated = false;
+  bool poseFeedbackActive = false;
+  bool velocityFeedbackActive = false;
 };
 
 class TrajectoryFollower {

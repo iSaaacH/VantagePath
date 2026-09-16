@@ -37,10 +37,24 @@ FollowerOutput TrajectoryFollower::update(
   FollowerOutput output;
   output.status = status_;
   if (status_ != FollowerStatus::kRunning || trajectory_ == nullptr) return output;
+  if (!std::isfinite(nowSeconds) || !std::isfinite(pose.x) ||
+      !std::isfinite(pose.y) || !std::isfinite(pose.theta) ||
+      !std::isfinite(measuredWheelSpeeds.left) ||
+      !std::isfinite(measuredWheelSpeeds.right) ||
+      !std::isfinite(availableVoltage)) {
+    status_ = FollowerStatus::kDiverged;
+    output.status = status_;
+    return output;
+  }
 
   const double elapsed = std::max(0.0, nowSeconds - startTime_);
   const double dt = std::clamp(nowSeconds - previousTime_, 1e-4, 0.1);
   const TrajectoryState reference = trajectory_->sample(elapsed);
+  output.elapsed = elapsed;
+  output.dt = dt;
+  output.reference = reference;
+  output.poseFeedbackActive = config_.enablePoseFeedback;
+  output.velocityFeedbackActive = config_.enableVelocityFeedback;
   output.poseError = poseController_.error(pose, reference);
   const double positionError = std::hypot(output.poseError.longitudinal,
                                           output.poseError.lateral);
@@ -80,7 +94,10 @@ FollowerOutput TrajectoryFollower::update(
   }
   settledCycles_ = 0;
 
-  const ChassisSpeeds command = poseController_.calculate(pose, reference);
+  const ChassisSpeeds command = config_.enablePoseFeedback
+      ? poseController_.calculate(pose, reference)
+      : ChassisSpeeds{reference.velocity, reference.angularVelocity};
+  output.chassisSetpoint = command;
   output.wheelSetpoint = kinematics_.toWheelSpeeds(command);
   const double leftAcceleration =
       (output.wheelSetpoint.left - previousSetpoint_.left) / dt;
@@ -88,19 +105,24 @@ FollowerOutput TrajectoryFollower::update(
       (output.wheelSetpoint.right - previousSetpoint_.right) / dt;
   const double voltageLimit = std::max(
       0.0, std::min(std::abs(availableVoltage), config_.nominalVoltage));
+  output.voltageLimit = voltageLimit;
 
   const double leftFf = leftFeedforward_.calculate(
       output.wheelSetpoint.left, leftAcceleration);
   const double rightFf = rightFeedforward_.calculate(
       output.wheelSetpoint.right, rightAcceleration);
-  output.leftVoltage = leftFf +
-      leftPid_.calculate(output.wheelSetpoint.left, measuredWheelSpeeds.left,
-                         dt, -voltageLimit - leftFf,
-                         voltageLimit - leftFf);
-  output.rightVoltage = rightFf +
-      rightPid_.calculate(output.wheelSetpoint.right, measuredWheelSpeeds.right,
-                          dt, -voltageLimit - rightFf,
-                          voltageLimit - rightFf);
+  output.leftFeedforwardVoltage = leftFf;
+  output.rightFeedforwardVoltage = rightFf;
+  if (config_.enableVelocityFeedback) {
+    output.leftFeedbackVoltage = leftPid_.calculate(
+        output.wheelSetpoint.left, measuredWheelSpeeds.left, dt,
+        -voltageLimit - leftFf, voltageLimit - leftFf);
+    output.rightFeedbackVoltage = rightPid_.calculate(
+        output.wheelSetpoint.right, measuredWheelSpeeds.right, dt,
+        -voltageLimit - rightFf, voltageLimit - rightFf);
+  }
+  output.leftVoltage = leftFf + output.leftFeedbackVoltage;
+  output.rightVoltage = rightFf + output.rightFeedbackVoltage;
   const double peak = std::max(std::abs(output.leftVoltage),
                                std::abs(output.rightVoltage));
   if (peak > voltageLimit && peak > 0.0) {

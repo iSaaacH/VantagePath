@@ -49,6 +49,9 @@ struct TrajectoryState {
   double velocity = 0.0;
   double acceleration = 0.0;
   double angularVelocity = 0.0;
+  // Preserves the intended drive direction when velocity is exactly zero at a
+  // trajectory endpoint. This matters to signed lateral pose feedback.
+  double direction = 1.0;
 };
 
 class Trajectory {
