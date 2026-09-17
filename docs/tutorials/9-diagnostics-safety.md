@@ -60,7 +60,7 @@ switch (output.status) {
 | Symptom | Check first |
 |---|---|
 | oscillates at endpoint | forced minimum output, tolerance below sensor noise, excessive pose gain |
-| snakes on a straight | heading noise/delay, track width, excessive convergence |
+| snakes on a straight | heading noise/delay, track width, excessive pose `kp` |
 | cuts corners | centripetal limit, wheel-speed limit, localization delay |
 | both wheels miss target similarly | feedforward or battery units |
 | one wheel consistently misses | that side's feedforward, gearing, friction, encoder scaling |
