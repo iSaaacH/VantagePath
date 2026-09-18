@@ -22,9 +22,41 @@ struct FollowerConfig {
   // these independently enable the outer pose loop and inner wheel loop.
   bool enablePoseFeedback = true;
   bool enableVelocityFeedback = true;
+  // Opt-in stop-at-end recovery, never applied to rolling endpoints.
+  bool enableTerminalRecovery = false;
+  // Commissioning only: zero output at profile end, without claiming settled.
+  bool stopAtProfileEnd = false;
+  double terminalMaxLinearSpeed = 0.0;
+  double terminalMaxAngularSpeed = 0.0;
+  double terminalMaxWheelAcceleration = 0.0;
+  // Optional corrected-command limits, in the same distance units as the path.
+  double maxWheelVelocity = 0.0;
+  double maxWheelAcceleration = 0.0;
+  // Zero disables these additional recovery guards (legacy library clients).
+  double terminalMaxPositionError = 0.0;
+  double terminalProgressTimeout = 0.0;
+  // Opt-in, pre-completion lateral-only taper for a stopped endpoint.
+  // Limited to the final monotonic braking segment; zero duration disables.
+  double brakingLateralTaperSeconds = 0.0;
+  double brakingLateralEndMultiplier = 1.0;
+  // Opt-in pre-profile-end point approach. Never pivots or reverses drive
+  // direction to chase an endpoint; zero window retains legacy tracking.
+  double pointApproachSeconds = 0.0;
+  double pointApproachBlendSeconds = 0.2;
+  double pointApproachTolerance = 0.35;
+  double pointApproachGuardDistance = 1.0;
+  double pointApproachMaxCurvature = 0.14;
+  double pointApproachMaxAngularSpeed = 0.75;
+  double pointApproachDeceleration = 35.0;
+  // Smooth the angular-speed ceiling to zero before the profile deadline.
+  // Opt-in; does not add a heading target or post-profile movement.
+  double pointApproachAngularBrakeSeconds = 0.0;
 };
 
-enum class FollowerStatus { kIdle, kRunning, kSettled, kTimedOut, kDiverged };
+enum class TerminalPhase { kTracking, kBraking, kRotateToPosition, kDriveToPosition,
+                           kAlignHeading };
+enum class FollowerStatus { kIdle, kRunning, kSettled, kTimedOut, kDiverged, kProfileComplete,
+                            kPositionComplete, kEndpointUnreachable };
 
 struct FollowerOutput {
   double leftVoltage = 0.0;
@@ -44,6 +76,9 @@ struct FollowerOutput {
   bool saturated = false;
   bool poseFeedbackActive = false;
   bool velocityFeedbackActive = false;
+  TerminalPhase terminalPhase = TerminalPhase::kTracking;
+  double lateralFeedbackMultiplier = 1.0;
+  double pointApproachBlend = 0.0;
 };
 
 class TrajectoryFollower {
@@ -67,9 +102,15 @@ class TrajectoryFollower {
   const Trajectory* trajectory_ = nullptr;
   double startTime_ = 0.0;
   double previousTime_ = 0.0;
+  double brakingLateralTaperDuration_ = 0.0;
   WheelSpeeds previousSetpoint_;
+  WheelSpeeds previousReferenceSetpoint_;
   FollowerStatus status_ = FollowerStatus::kIdle;
   unsigned settledCycles_ = 0;
+  TerminalPhase terminalPhase_ = TerminalPhase::kTracking;
+  double terminalDirection_ = 1.0;
+  double terminalBestError_ = 0.0;
+  double terminalProgressTime_ = 0.0;
 };
 
 }  // namespace vantage

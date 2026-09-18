@@ -29,6 +29,9 @@ NonlinearPoseController::NonlinearPoseController(
   if (!std::isfinite(config.kp) || !std::isfinite(config.kd) ||
       !std::isfinite(config.minimumFeedbackSpeed) ||
       !std::isfinite(config.maxLinearCorrection) ||
+      !std::isfinite(config.longitudinalScale) || config.longitudinalScale < 0.0 ||
+      !std::isfinite(config.lateralScale) || config.lateralScale < 0.0 ||
+      !std::isfinite(config.headingScale) || config.headingScale < 0.0 ||
       !std::isfinite(config.maxAngularCorrection) || !(config.kp > 0.0) ||
       !(config.kd > 0.0) || config.kd > 1.0 ||
       config.minimumFeedbackSpeed < 0.0 ||
@@ -45,7 +48,12 @@ PoseError NonlinearPoseController::error(
 }
 
 ChassisSpeeds NonlinearPoseController::calculate(
-    const Pose2d& current, const TrajectoryState& reference) const {
+    const Pose2d& current, const TrajectoryState& reference,
+    double lateralMultiplier) const {
+  if (!std::isfinite(lateralMultiplier) || lateralMultiplier < 0.0 ||
+      lateralMultiplier > 1.0) {
+    throw std::invalid_argument("lateral multiplier must be in [0, 1]");
+  }
   const PoseError e = error(current, reference);
   const double vRef = reference.velocity;
   const double wRef = reference.angularVelocity;
@@ -62,17 +70,22 @@ ChassisSpeeds NonlinearPoseController::calculate(
                              feedbackSpeed * feedbackSpeed);
 
   const double linearCorrection = std::clamp(
-      k * e.longitudinal, -config_.maxLinearCorrection,
+      config_.longitudinalScale * k * e.longitudinal, -config_.maxLinearCorrection,
       config_.maxLinearCorrection);
   const double angularCorrection = std::clamp(
-      k * e.heading + config_.kp * signedFeedbackSpeed *
+      config_.headingScale * k * e.heading + lateralMultiplier * config_.lateralScale * config_.kp * signedFeedbackSpeed *
           sinc(e.heading) * e.lateral,
       -config_.maxAngularCorrection, config_.maxAngularCorrection);
   return {vRef * std::cos(e.heading) + linearCorrection,
           wRef + angularCorrection};
 }
 
-MotorFeedforward::MotorFeedforward(FeedforwardConfig config) : config_(config) {}
+MotorFeedforward::MotorFeedforward(FeedforwardConfig config) : config_(config) {
+  if (!std::isfinite(config.staticActivationVelocity) ||
+      config.staticActivationVelocity < 0.0) {
+    throw std::invalid_argument("static activation speed must be finite and nonnegative");
+  }
+}
 
 double MotorFeedforward::calculate(double velocity, double acceleration) const {
   double sign = 0.0;
@@ -82,6 +95,23 @@ double MotorFeedforward::calculate(double velocity, double acceleration) const {
     sign = std::clamp(velocity / config_.staticVelocityDeadband, -1.0, 1.0);
   }
   return config_.staticGain * sign + config_.velocityGain * velocity +
+         config_.accelerationGain * acceleration;
+}
+
+double MotorFeedforward::calculateWithHysteresis(double velocity,
+                                                double acceleration) {
+  if (config_.staticActivationVelocity == 0.0) {
+    return calculate(velocity, acceleration);
+  }
+  const double magnitude = std::abs(velocity);
+  if (magnitude >= config_.staticActivationVelocity) {
+    staticDirection_ = velocity > 0.0 ? 1.0 : -1.0;
+  } else if (magnitude <= config_.staticActivationVelocity * 0.5 ||
+             velocity * staticDirection_ <= 0.0) {
+    staticDirection_ = 0.0;
+  }
+  return config_.staticGain * staticDirection_ +
+         config_.velocityGain * velocity +
          config_.accelerationGain * acceleration;
 }
 

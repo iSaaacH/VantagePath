@@ -26,7 +26,7 @@ class DifferentialDriveKinematics {
 };
 
 struct NonlinearControllerConfig {
-  // These are the only two feedback gains. The controller is Ramsete-style,
+  // Base gain schedule is Ramsete-style,
   // not an independent axis PID: kp is the spatial convergence coefficient
   // (traditionally "b") and kd is the damping ratio (traditionally "zeta").
   double kp = 2.0;
@@ -35,6 +35,11 @@ struct NonlinearControllerConfig {
   double minimumFeedbackSpeed = 0.10;
   double maxLinearCorrection = 0.75;
   double maxAngularCorrection = 4.0;
+  // Independent correction weights; 1 preserves the original controller.
+  // Keep kp/kd fixed when tuning these. Feedforward is not scaled.
+  double longitudinalScale = 1.0;
+  double lateralScale = 1.0;
+  double headingScale = 1.0;
 };
 
 // A velocity-scheduled nonlinear unicycle tracker. Unlike a point PID, it
@@ -44,7 +49,8 @@ class NonlinearPoseController {
  public:
   explicit NonlinearPoseController(NonlinearControllerConfig config = {});
   ChassisSpeeds calculate(const Pose2d& current,
-                          const TrajectoryState& reference) const;
+                          const TrajectoryState& reference,
+                          double lateralMultiplier = 1.0) const;
   PoseError error(const Pose2d& current,
                   const TrajectoryState& reference) const;
 
@@ -59,15 +65,21 @@ struct FeedforwardConfig {
   // Fade static friction compensation in over this velocity magnitude.
   // Zero preserves the original sign-based compensation.
   double staticVelocityDeadband = 0.0;
+  // Optional follower-only Schmitt threshold: full kS above this speed,
+  // release below half of it. Zero retains the stateless fade behavior.
+  double staticActivationVelocity = 0.0;
 };
 
 class MotorFeedforward {
  public:
   explicit MotorFeedforward(FeedforwardConfig config = {});
   double calculate(double velocity, double acceleration) const;
+  double calculateWithHysteresis(double velocity, double acceleration);
+  void reset() { staticDirection_ = 0.0; }
 
  private:
   FeedforwardConfig config_;
+  double staticDirection_ = 0.0;
 };
 
 struct VelocityPidConfig {

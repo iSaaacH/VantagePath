@@ -72,7 +72,8 @@ double FusedDrive::fuse() const {
         ? raw * motors_[index].toCommon
         : std::numeric_limits<double>::infinity();
   }
-  return fusion_.update(readings).value;
+  const auto result = fusion_.update(readings);
+  return result.available ? result.value : std::numeric_limits<double>::infinity();
 }
 
 double FusedDrive::get_position(std::uint8_t) const { return fuse(); }

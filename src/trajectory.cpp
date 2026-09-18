@@ -74,6 +74,7 @@ void validate(const TrajectoryConfig& c) {
   const double values[] = {
       c.maxVelocity, c.maxAcceleration, c.maxDeceleration,
       c.maxCentripetalAcceleration, c.maxWheelVelocity, c.maxVoltage,
+      c.maxAngularVelocity,
       c.trackWidth, c.startVelocity, c.endVelocity, c.sampleDistance,
       c.leftFeedforward.staticGain, c.leftFeedforward.velocityGain,
       c.leftFeedforward.accelerationGain, c.rightFeedforward.staticGain,
@@ -92,11 +93,20 @@ void validate(const TrajectoryConfig& c) {
       c.startVelocity > c.maxVelocity || c.endVelocity > c.maxVelocity) {
     throw std::invalid_argument("boundary velocities must be within limits");
   }
+  if (c.maxAngularVelocity < 0.0) {
+    throw std::invalid_argument("maxAngularVelocity must be nonnegative");
+  }
   if (c.maxVoltage > 0.0 &&
       (!(c.leftFeedforward.accelerationGain > 0.0) ||
        !(c.rightFeedforward.accelerationGain > 0.0))) {
     throw std::invalid_argument(
         "voltage constraint requires positive left/right acceleration gains");
+  }
+  for (const auto& ff : {c.leftFeedforward, c.rightFeedforward}) {
+    if (ff.staticGain < 0 || ff.velocityGain < 0 || ff.accelerationGain < 0 ||
+        (c.maxVoltage > 0 && c.maxVoltage <= ff.staticGain)) {
+      throw std::invalid_argument("voltage budget must exceed nonnegative static feedforward");
+    }
   }
 }
 
@@ -137,8 +147,8 @@ AccelerationBounds voltageAccelerationBounds(const Sample& sample, double speed,
     bounds.maximum = std::min(bounds.maximum, high);
   }
   if (bounds.minimum > bounds.maximum) {
-    // No acceleration can make this state voltage-feasible. Force the time
-    // passes toward a stop rather than emitting an impossible trajectory.
+    // The final conservative voltage retiming pass below must resolve this;
+    // zero acceleration alone does NOT make this speed feasible.
     return {0.0, 0.0};
   }
   return bounds;
@@ -159,7 +169,7 @@ double Trajectory::length() const {
 
 TrajectoryState Trajectory::sample(double time) const {
   if (states_.empty()) return {};
-  if (time <= 0.0) return states_.front();
+  if (time <= states_.front().time) return states_.front();
   if (time >= duration()) return states_.back();
   const auto upper = std::lower_bound(
       states_.begin(), states_.end(), time,
@@ -171,12 +181,16 @@ TrajectoryState Trajectory::sample(double time) const {
   const double u = span > 1e-9 ? (time - lower->time) / span : 0.0;
   TrajectoryState out;
   out.time = time;
-  out.distance = lower->distance + (upper->distance - lower->distance) * u;
-  out.pose = interpolate(lower->pose, upper->pose, u);
-  out.curvature = lower->curvature + (upper->curvature - lower->curvature) * u;
+  const double elapsed = time - lower->time;
+  const double acceleration = span > 1e-9 ? (upper->velocity-lower->velocity)/span : 0;
+  const double travel = std::abs(lower->velocity * elapsed + .5 * acceleration * elapsed * elapsed);
+  const double ds = upper->distance - lower->distance;
+  const double geometryFraction = ds > 1e-9 ? std::clamp(travel / ds, 0.0, 1.0) : u;
+  out.distance = lower->distance + ds * geometryFraction;
+  out.pose = interpolate(lower->pose, upper->pose, geometryFraction);
+  out.curvature = lower->curvature + (upper->curvature - lower->curvature) * geometryFraction;
   out.velocity = lower->velocity + (upper->velocity - lower->velocity) * u;
-  out.acceleration = lower->acceleration +
-                     (upper->acceleration - lower->acceleration) * u;
+  out.acceleration = acceleration;
   out.angularVelocity = out.velocity * out.curvature;
   out.direction = lower->direction;
   return out;
@@ -243,7 +257,7 @@ Trajectory generateTrajectory(const std::vector<Waypoint>& waypoints,
     const auto second = bezierDerivative(first);
     const int count = std::max(16, static_cast<int>(std::ceil(
         (start.bezierToNext ? polygonLength : chord) / config.sampleDistance * 2.0)));
-    for (int i = segment == 0 ? 0 : 1; i <= count; ++i) {
+    for (int i = 0; i <= count; ++i) {
       const double t = static_cast<double>(i) / count;
       const auto position = start.bezierToNext ? bezierValue(controls, t) : Pose2d{x.value(t), y.value(t), 0.0};
       const auto velocity = start.bezierToNext ? bezierValue(first, t) : Pose2d{x.first(t), y.first(t), 0.0};
@@ -263,6 +277,12 @@ Trajectory generateTrajectory(const std::vector<Waypoint>& waypoints,
           const double ty = i == 0 ? other.y-position.y : position.y-other.y;
           if (std::hypot(tx, ty) > 1e-9) { heading = std::atan2(ty, tx); break; }
         }
+      }
+      if (segment > 0 && i == 0) {
+        if (std::abs(wrapAngle(heading - samples.back().pose.theta)) > 1e-3) {
+          throw std::invalid_argument("path join is not tangent-continuous; split into explicit motions or smooth controls");
+        }
+        continue;
       }
       Sample sample{{position.x, position.y, heading},
                     curvature, 0.0, arcLength};
@@ -285,10 +305,24 @@ Trajectory generateTrajectory(const std::vector<Waypoint>& waypoints,
   std::vector<double> velocity(samples.size(), config.maxVelocity);
   for (std::size_t i = 0; i < samples.size(); ++i) {
     const double curvature = std::abs(samples[i].curvature);
-    const double wheelFactor = std::max(
-        std::abs(1.0 - samples[i].curvature * config.trackWidth * 0.5),
-        std::abs(1.0 + samples[i].curvature * config.trackWidth * 0.5));
+    // Bound both endpoints of each interpolation interval. Limiting only the
+    // sampled wheel speed lets interpolated v * (1 +/- curvature * halfTrack)
+    // exceed the wheel ceiling between samples.
+    const double curvatureBound = std::max({
+        curvature,
+        std::abs(samples[i == 0 ? 0 : i - 1].curvature),
+        std::abs(samples[std::min(i + 1, samples.size() - 1)].curvature)});
+    const double wheelFactor = 1.0 + curvatureBound * config.trackWidth * 0.5;
     velocity[i] = std::min(velocity[i], config.maxWheelVelocity / wheelFactor);
+    if (config.maxAngularVelocity > 0.0) {
+      // v <= omega_max / |curvature|. Include adjacent samples so linear
+      // interpolation of velocity and curvature also respects this ceiling.
+      // Applied before time passes: the robot brakes BEFORE a tight bend.
+      if (curvatureBound > 1e-9) {
+        velocity[i] = std::min(velocity[i],
+                              config.maxAngularVelocity / curvatureBound);
+      }
+    }
     if (curvature > 1e-9) {
       velocity[i] = std::min(
           velocity[i], std::sqrt(config.maxCentripetalAcceleration / curvature));
@@ -327,6 +361,8 @@ Trajectory generateTrajectory(const std::vector<Waypoint>& waypoints,
     if (i > 0) {
       const double ds = samples[i].distance - samples[i - 1].distance;
       const double sum = velocity[i] + velocity[i - 1];
+      if (ds > 1e-9 && sum <= 1e-9)
+        throw std::invalid_argument("trajectory contains an untraversable zero-speed interval");
       const double dt = sum > 1e-9 ? 2.0 * ds / sum : 0.0;
       states[i].time = states[i - 1].time + dt;
       if (dt > 1e-9) {
@@ -336,6 +372,41 @@ Trajectory generateTrajectory(const std::vector<Waypoint>& waypoints,
     }
   }
   states.back().acceleration = 0.0;
+  // Conservative interval bounds also cover interpolated curvature-rate wheel
+  // acceleration. A uniform time dilation preserves geometry and all zero-speed
+  // stops while making speed/acceleration/voltage feasible together.
+  double timeScale = 1.0;
+  if (config.maxVoltage > 0) {
+    const double halfTrack = config.trackWidth * .5;
+    for (std::size_t i = 1; i < states.size(); ++i) {
+      const auto& a = states[i-1]; const auto& b = states[i];
+      const double ds = b.distance-a.distance;
+      const double maxV = std::max(std::abs(a.velocity),std::abs(b.velocity));
+      const double dk = ds > 1e-9 ? std::abs(b.curvature-a.curvature)/ds : 0;
+      for (int side = 0; side < 2; ++side) {
+        const auto& ff = side == 0 ? config.leftFeedforward : config.rightFeedforward;
+        const double sign = side == 0 ? -1.0 : 1.0;
+        const double factor = std::max(std::abs(1+sign*halfTrack*a.curvature),
+                                       std::abs(1+sign*halfTrack*b.curvature));
+        const double vVolts = ff.velocityGain * maxV * factor;
+        const double aVolts = ff.accelerationGain *
+            (std::abs(a.acceleration)*factor + halfTrack*dk*maxV*maxV);
+        const double budget = config.maxVoltage-ff.staticGain;
+        timeScale = std::max(timeScale,
+            (vVolts+std::sqrt(vVolts*vVolts+4*budget*aVolts))/(2*budget));
+      }
+    }
+  }
+  if (timeScale > 1.0+1e-9) {
+    if (config.startVelocity > 0 || config.endVelocity > 0)
+      throw std::invalid_argument("voltage retiming cannot preserve requested rolling boundary speeds");
+    for (auto& state : states) {
+      state.time *= timeScale;
+      state.velocity /= timeScale;
+      state.angularVelocity /= timeScale;
+      state.acceleration /= timeScale*timeScale;
+    }
+  }
   return Trajectory(std::move(states));
 }
 

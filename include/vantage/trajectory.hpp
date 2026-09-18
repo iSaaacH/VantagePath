@@ -39,6 +39,9 @@ struct TrajectoryConfig {
   double endVelocity = 0.0;
   double sampleDistance = 0.025;
   bool reversed = false;
+  // Optional planned |angular velocity| ceiling in rad/s. Zero disables it.
+  // Applies to the reference trajectory, not follower feedback corrections.
+  double maxAngularVelocity = 0.0;
 };
 
 struct TrajectoryState {
@@ -70,7 +73,8 @@ class Trajectory {
 };
 
 // Quintic Hermite or arbitrary-degree Bezier geometry plus forward/backward
-// time parameterization. Stops at joins involving Bezier segments.
+// time parameterization. Stops at tangent-continuous Bezier joins; rejects
+// sharp joins which require an explicit turn/separate trajectory.
 // Throws std::invalid_argument for unsafe configuration.
 Trajectory generateTrajectory(const std::vector<Waypoint>& waypoints,
                               const TrajectoryConfig& config);
