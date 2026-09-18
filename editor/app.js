@@ -1,4 +1,4 @@
-import { dragPosition, FIELD_SIZE, clamp, cppExport, estimateLength, makeDocument, mirrorWaypoint, motionProfile, normalizeSegmentDirections, profileDistance, segmentPoint, setControlCount, reverseWaypoints, validateDocument, wrapRadians } from "./model.js";
+import { dragPosition, FIELD_SIZE, clamp, cppExport, estimateLength, makeDocument, mirrorWaypoint, motionProfile, nearestPathDistance, normalizeSegmentDirections, profileDistance, profileTimeAtDistance, segmentPoint, setControlCount, reverseWaypoints, validateDocument, wrapRadians } from "./model.js";
 
 const STORAGE_KEY = "vantagepath-studio-v1";
 const svg = document.querySelector("#field");
@@ -113,7 +113,10 @@ function updatePlaybackUi() {
   button.setAttribute("aria-label", playback.playing ? "Pause path" : "Play full path");
   const pose = poseAtDistance(samples, profileDistance(profile, playback.time), activePath());
   const robot = document.querySelector("#playback-robot");
-  if (robot) robot.style.display = playback.playing || playback.time > 0 ? "" : "none";
+  if (robot) {
+    robot.style.display = samples.length > 1 ? "" : "none";
+    robot.classList.toggle("is-dragging", drag?.type === "playback");
+  }
   if (pose && robot) robot.setAttribute("transform", `translate(${pose.x} ${FIELD_SIZE - pose.y}) rotate(${-pose.heading * 180 / Math.PI})`);
 }
 
@@ -205,11 +208,13 @@ function pathMarkup(path) {
       <text class="anchor-label" x="${point.x + 3.8}" y="${FIELD_SIZE - point.y - 3}">P${index + 1}</text></g>`;
   }).join("");
   const robot = documentState.robot;
-  const robotMarkup = `<g id="playback-robot" transform="translate(${path.waypoints[0].x} ${FIELD_SIZE - path.waypoints[0].y}) rotate(${-path.waypoints[0].heading * 180 / Math.PI})">
+  const robotMarkup = `<g id="playback-robot" class="playback-robot" data-playback-marker="true" transform="translate(${path.waypoints[0].x} ${FIELD_SIZE - path.waypoints[0].y}) rotate(${-path.waypoints[0].heading * 180 / Math.PI})">
     <rect class="robot-box" x="${-robot.length / 2}" y="${-robot.width / 2}" width="${robot.length}" height="${robot.width}" rx="1"/>
     <line class="robot-nose" x1="${robot.length * .12}" y1="0" x2="${robot.length * .43}" y2="0"/>
   </g>`;
-  return `${curves.join("")}${bezierControls}${controls}${robotMarkup}`;
+  // Keep route/control points above the player so they remain selectable when
+  // the playback robot is parked directly on a point.
+  return `${curves.join("")}${robotMarkup}${bezierControls}${controls}`;
 }
 
 function robotStartMarkup() {
@@ -258,9 +263,15 @@ function render() {
     <label><span class="visually-hidden">Anchor ${index + 1} X coordinate in inches</span><input data-coordinate-point-id="${item.id}" data-coordinate="x" type="number" min="0" max="144" step="0.25" value="${item.x.toFixed(2)}" /></label>
     <label><span class="visually-hidden">Anchor ${index + 1} Y coordinate in inches</span><input data-coordinate-point-id="${item.id}" data-coordinate="y" type="number" min="0" max="144" step="0.25" value="${item.y.toFixed(2)}" /></label>
   </div>`).join("");
-  segmentList.innerHTML = (path?.segmentReversed ?? []).map((reversed, index) => `<button class="segment-direction ${index === selectedSegment ? "is-current" : ""}" data-segment-index="${index}" aria-pressed="${index === selectedSegment}">
-    <span><b>P${index+1} → P${index+2}</b><small>${path.controlPoints[index] === null ? "Legacy spline" : `${path.controlPoints[index].length} controls`}</small></span><strong>${reversed ? "Reverse" : "Forward"}</strong>
-  </button>`).join("");
+  segmentList.innerHTML = (path?.segmentReversed ?? []).map((reversed, index) => `<div class="segment-direction ${index === selectedSegment ? "is-current" : ""}">
+    <button class="segment-select-button" data-segment-index="${index}" aria-pressed="${index === selectedSegment}">
+      <span><b>Segment ${index+1} · P${index+1} → P${index+2}</b><small>${path.controlPoints[index] === null ? "Legacy spline" : `${path.controlPoints[index].length} controls`}</small></span>
+    </button>
+    <div class="segment-direction-toggle" role="group" aria-label="Drive direction for segment ${index+1}">
+      <button class="${reversed ? "" : "is-active"}" data-direction-index="${index}" data-direction-value="false" aria-pressed="${!reversed}">→ Forward</button>
+      <button class="${reversed ? "is-active" : ""}" data-direction-index="${index}" data-direction-value="true" aria-pressed="${reversed}">← Reverse</button>
+    </div>
+  </div>`).join("");
   document.querySelector("#path-summary").textContent = `${path?.waypoints.length ?? 0} anchors · ${estimateLength(path?.waypoints ?? [], 24, path?.segmentReversed ?? [], path?.controlPoints ?? []).toFixed(1)} in`;
   const directions = path?.segmentReversed ?? [];
   document.querySelector("#direction-summary").textContent = directions.some(Boolean) ? (directions.every(Boolean) ? "All reverse" : "Mixed") : "All forward";
@@ -420,6 +431,12 @@ function runAction(action) {
   if (action === "mirror-left-right") return transformPath("left-right");
   if (action === "mirror-bottom-top") return transformPath("bottom-top");
   if (action === "reverse-order") { const path=activePath(); if(path){path.waypoints=reverseWaypoints(path.waypoints);path.segmentReversed.reverse();path.controlPoints.reverse().forEach(items => items?.reverse());commit("Path order reversed");} return; }
+  if (action === "all-forward" || action === "all-reverse") {
+    const path = activePath(); if (!path) return;
+    normalizeSegmentDirections(path);
+    path.segmentReversed.fill(action === "all-reverse");
+    commit(action === "all-reverse" ? "Entire route set to reverse" : "Entire route set to forward"); return;
+  }
   if (action === "play-path") return togglePlayback();
   if (action === "delete-path") {
     if (!activePath()) return;
@@ -451,6 +468,15 @@ document.addEventListener("click", (event) => {
     const path = activePath(); const index = Number(segmentButton.dataset.segmentIndex);
     if (path?.segmentReversed[index] !== undefined) { startSelected = false; selectedSegment = index; selectedControlId = null; render(); }
   }
+  const directionButton = event.target.closest("[data-direction-index]");
+  if (directionButton) {
+    const path = activePath(); const index = Number(directionButton.dataset.directionIndex);
+    if (path?.segmentReversed[index] !== undefined) {
+      startSelected = false; selectedSegment = index; selectedControlId = null;
+      path.segmentReversed[index] = directionButton.dataset.directionValue === "true";
+      commit(`Segment ${index+1} set to ${path.segmentReversed[index] ? "reverse" : "forward"}`);
+    }
+  }
   const pointButton = event.target.closest("[data-select-point-id]");
   if (pointButton) { startSelected = false; selectedControlId = null; selectedPointId = pointButton.dataset.selectPointId; stopPlayback(true); render(); }
   const alliance = event.target.closest("[data-alliance]")?.dataset.alliance;
@@ -471,8 +497,17 @@ waypointList.addEventListener("change", (event) => {
 });
 
 svg.addEventListener("pointerdown", event => {
-  const target = event.target.closest("[data-point-id],[data-handle-id],[data-control-id],[data-start-marker]");
+  const target = event.target.closest("[data-point-id],[data-handle-id],[data-control-id],[data-start-marker],[data-playback-marker]");
   if (!target) return;
+  if (target.dataset.playbackMarker) {
+    stopPlayback(false);
+    const { samples, profile } = playbackData();
+    if (samples.length < 2 || !(profile.duration > 0)) return;
+    drag = { type:"playback", pointerId:event.pointerId, samples, profile };
+    svg.setPointerCapture(event.pointerId);
+    playback.time = profileTimeAtDistance(profile, nearestPathDistance(samples, svgCoordinates(event)));
+    updatePlaybackUi(); event.preventDefault(); return;
+  }
   stopPlayback(true);
   const { pointId, handleId, controlId, startMarker } = target.dataset;
   startSelected = Boolean(startMarker); selectedControlId = controlId ?? null;
@@ -489,6 +524,10 @@ svg.addEventListener("pointermove", event => {
   const at = svgCoordinates(event);
   document.querySelector("#coordinate-readout").textContent = `X ${at.x.toFixed(2)} · Y ${at.y.toFixed(2)}`;
   if (!drag || drag.pointerId !== event.pointerId) return;
+  if (drag.type === "playback") {
+    playback.time = profileTimeAtDistance(drag.profile, nearestPathDistance(drag.samples, at));
+    updatePlaybackUi(); return;
+  }
   const step = documentState.snap && !event.shiftKey ? documentState.snapStep : 0;
   const moved = dragPosition(drag.origin, drag.pointerStart, at, step, event.altKey);
   const point = drag.point;
@@ -501,14 +540,16 @@ svg.addEventListener("pointermove", event => {
 
 svg.addEventListener("pointerup", event => {
   if (drag?.pointerId !== event.pointerId) return;
+  if (drag.type === "playback") { drag = null; updatePlaybackUi(); return; }
   const message = drag.type === "start" ? "Robot start updated" : drag.type === "control" ? "Control point updated" : "Route point updated";
   drag = null; commit(message);
 });
 svg.addEventListener("pointercancel", () => {
   if (!drag) return;
+  if (drag.type === "playback") { drag = null; updatePlaybackUi(); return; }
   documentState = JSON.parse(drag.before); drag = null; render();
 });
-svg.addEventListener("dblclick", (event) => { if (!event.target.closest("[data-point-id],[data-handle-id],[data-control-id],[data-start-marker]")) addPoint(svgCoordinates(event)); });
+svg.addEventListener("dblclick", (event) => { if (!event.target.closest("[data-point-id],[data-handle-id],[data-control-id],[data-start-marker],[data-playback-marker]")) addPoint(svgCoordinates(event)); });
 
 for (const [key,input] of Object.entries(pointInputs)) input.addEventListener("change", () => {
   const point=selectedPoint(); if(!point) return;

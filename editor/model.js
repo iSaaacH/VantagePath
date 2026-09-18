@@ -152,6 +152,45 @@ export function profileDistance(profile, time) {
   return Math.min(profile.length, profile.accelerateDistance + profile.cruiseDistance + profile.peak * brakingTime - profile.deceleration * brakingTime * brakingTime / 2);
 }
 
+export function profileTimeAtDistance(profile, distance) {
+  if (!(profile.duration > 0) || !(profile.length > 0)) return 0;
+  const target = Math.min(profile.length, Math.max(0, Number(distance) || 0));
+  let lower = 0;
+  let upper = profile.duration;
+  // The profile is monotonic, so a small binary search is simpler and less
+  // error-prone than maintaining three separate inverse equations.
+  for (let iteration = 0; iteration < 36; iteration += 1) {
+    const middle = (lower + upper) / 2;
+    if (profileDistance(profile, middle) < target) lower = middle;
+    else upper = middle;
+  }
+  return (lower + upper) / 2;
+}
+
+export function nearestPathDistance(samples, point) {
+  if (!samples?.length) return 0;
+  let nearestDistance = samples[0].distance ?? 0;
+  let nearestSquared = (samples[0].x - point.x) ** 2 + (samples[0].y - point.y) ** 2;
+  for (let index = 1; index < samples.length; index += 1) {
+    const start = samples[index - 1];
+    const end = samples[index];
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const lengthSquared = dx * dx + dy * dy;
+    const ratio = lengthSquared > 0
+      ? Math.min(1, Math.max(0, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared))
+      : 0;
+    const x = start.x + dx * ratio;
+    const y = start.y + dy * ratio;
+    const squared = (x - point.x) ** 2 + (y - point.y) ** 2;
+    if (squared < nearestSquared) {
+      nearestSquared = squared;
+      nearestDistance = (start.distance ?? 0) + ((end.distance ?? start.distance ?? 0) - (start.distance ?? 0)) * ratio;
+    }
+  }
+  return nearestDistance;
+}
+
 export function quinticPoint(start, end, t, reversed = false) {
   // Waypoint heading is the robot's nose direction. A reversed segment drives
   // that same nose backwards, so the geometric spline tangent points 180° from

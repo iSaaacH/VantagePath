@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { dragPosition, bezierPoint, segmentPoint, setControlCount, FIELD_SIZE, cornerToGps, cppExport, directionRuns, estimateLength, makeDocument, mirrorWaypoint, motionProfile, profileDistance, quinticPoint, reverseWaypoints, validateDocument, wrapRadians } from "./model.js";
+import { dragPosition, bezierPoint, segmentPoint, setControlCount, DEFAULT_ROBOT, FIELD_SIZE, cornerToGps, cppExport, directionRuns, estimateLength, makeDocument, mirrorWaypoint, motionProfile, nearestPathDistance, profileDistance, profileTimeAtDistance, quinticPoint, reverseWaypoints, validateDocument, wrapRadians } from "./model.js";
 
 assert.equal(FIELD_SIZE, 144, "the playable floor is exactly 144 inches");
 assert.deepEqual(
@@ -100,3 +100,13 @@ assert.deepEqual(dragPosition({x:20,y:30},{x:21,y:31},{x:22,y:32}),{x:21,y:31});
 assert.deepEqual(dragPosition({x:20,y:30},{x:21,y:31},{x:26,y:36},0.25,true),{x:21,y:31});
 assert.deepEqual(dragPosition({x:20,y:30},{x:21,y:31},{x:21.1,y:31.1},0),{x:20.1,y:30.1});
 assert.deepEqual(dragPosition({x:143,y:1},{x:0,y:0},{x:5,y:-5}),{x:144,y:0});
+
+// Playback dragging projects the pointer onto the sampled route and preserves
+// the velocity profile when converting route distance back into preview time.
+const dragSamples = [{x:0,y:0,distance:0},{x:10,y:0,distance:10},{x:10,y:10,distance:20}];
+assert.equal(nearestPathDistance(dragSamples,{x:6,y:3}),6);
+assert.equal(nearestPathDistance(dragSamples,{x:13,y:7}),17);
+const dragProfile = motionProfile(120, DEFAULT_ROBOT);
+for (const distance of [0, 12, 60, 119.5, 120]) {
+  assert.ok(Math.abs(profileDistance(dragProfile, profileTimeAtDistance(dragProfile,distance))-distance) < 1e-6);
+}

@@ -22,6 +22,9 @@ node --test editor/model.test.mjs
 Select a route in the left menu, then select its segment. Routes can be renamed
 and duplicated. The inspector groups segment geometry, drive direction, and
 control points together; robot, field, mirror, and export settings expand on demand.
+Each route segment also has an always-visible **Forward / Reverse** switch in the
+left rail. Use **Set entire route** for a one-click route-wide direction, then
+override individual segments when the route mixes forward and reverse driving.
 
 New segments use Bézier geometry. Set **Control points** to `0` for a straight
 line, `6` for six editable controls, or another nonnegative integer. Use **+ Add**
@@ -53,4 +56,6 @@ Start placement is saved in `.vpath` files and autosave. Older documents initial
 it from their first route point. C++ export includes a separate `…RobotStart`
 `Pose2d` for initializing localization; GPS export includes both the GPS pose
 and its conversion to the trajectory frame. Playback previews the selected route,
-while the purple outline remains at the document's initial placement.
+while the purple outline remains at the document's initial placement. Drag the
+yellow playback robot directly along the field route to scrub the preview; the
+timeline slider remains available for fine adjustment.

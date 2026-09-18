@@ -49,7 +49,11 @@
           <div class="route-toolbar"><span id="route-count"></span><button data-action="duplicate-path">Duplicate</button></div>
           <div id="path-list" class="path-list"></div>
           <section class="inspector-section route-settings"><label for="route-name">Route name</label><input id="route-name" /><button class="use-start" data-action="use-robot-start">Set first route point to robot start</button><small class="route-start-note">Robot start is separate. Moving it leaves existing routes in place.</small></section>
-          <section class="inspector-section segment-list-section"><div class="section-label"><span>Route segments</span></div><div id="segment-list" class="segment-list"></div></section>
+          <section class="inspector-section segment-list-section">
+            <div class="section-label"><span>Route segments</span><small>set each leg</small></div>
+            <div class="route-direction-actions"><span>Set entire route</span><div><button data-action="all-forward">→ Forward</button><button data-action="all-reverse">← Reverse</button></div></div>
+            <div id="segment-list" class="segment-list"></div>
+          </section>
           <div class="rail-note"><span>Corner coordinate model</span><p>The canvas is authored from the bottom-left. GPS export converts to VEX’s official centre origin and compass heading.</p></div>
         </aside>
 
@@ -71,7 +75,7 @@
             <svg id="field" viewBox="-9 -9 162 162" role="img" aria-label="Interactive VEX Override field path editor"></svg>
             <div class="axis axis-x">X → 144″</div><div class="axis axis-y">Y → 144″</div>
             <div class="coordinate-readout" id="coordinate-readout">X 0.0 · Y 0.0</div>
-            <div class="canvas-help">Alt: ⅕-speed drag · Shift: no snap · Double-click: add route point</div>
+            <div class="canvas-help">Drag robot: scrub preview · Alt: ⅕-speed points · Shift: no snap · Double-click: add route point</div>
             <div class="field-credit">Orthographic field by <a href="https://field-rendering.jerryio.com/" target="_blank" rel="noopener">Jerry Lum</a> · CC BY 4.0 · exact 144″ floor crop</div>
           </div>
           <div class="point-legend" aria-label="Field marker guide">
@@ -83,7 +87,7 @@
             <div><span class="section-index">03 / Preview · estimated</span><strong id="path-summary">3 anchors · 0.0 in</strong></div>
             <div class="playback-controls">
               <button id="play-path" class="play-button" data-action="play-path" aria-label="Play full path">▶</button>
-              <label class="scrubber-label" for="path-scrubber"><span class="visually-hidden">Path playback position</span><input id="path-scrubber" type="range" min="0" max="1000" value="0" /></label>
+              <label class="scrubber-label" for="path-scrubber"><span class="visually-hidden">Path playback position</span><input id="path-scrubber" type="range" min="0" max="1000" value="0" title="Drag the slider or drag the robot on the field" /></label>
               <output id="playback-time">0.0 / 0.0 s</output>
             </div>
             <div class="direction-summary"><span>Drive direction</span><strong id="direction-summary">All forward</strong></div>
