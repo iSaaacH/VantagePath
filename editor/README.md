@@ -46,16 +46,13 @@ fifth of the pointer speed. Grabbing the edge of a point preserves the cursor
 offset. Small blue diamonds labelled **C** shape the curve; white circles labelled
 **P** are route points the robot passes through. The field legend explains both.
 
-**Robot start** is a separate document setting with X, Y and facing inputs and a
-purple robot outline on the field. Drag its outline to move it. New routes begin
-at this position. Changing the start does not silently move existing routes;
-use **Set first route point to robot start** when you want to align one. Route
-mirroring, reversal and deletion leave robot start unchanged.
+**P1 on the first route is the robot start.** The X, Y, and facing inputs edit
+that point directly, and dragging or editing P1 updates the start pose. There is
+no second start marker to align. New routes begin at the same current start pose.
 
-Start placement is saved in `.vpath` files and autosave. Older documents initialize
-it from their first route point. C++ export includes a separate `…RobotStart`
-`Pose2d` for initializing localization; GPS export includes both the GPS pose
-and its conversion to the trajectory frame. Playback previews the selected route,
-while the purple outline remains at the document's initial placement. Drag the
-yellow playback robot directly along the field route to scrub the preview; the
-timeline slider remains available for fine adjustment.
+Start placement is saved in `.vpath` files and autosave. Older documents are
+migrated so their first route point becomes the canonical start. C++ export
+includes a separate `…RobotStart` `Pose2d` for initializing localization; GPS
+export includes both the GPS pose and its conversion to the trajectory frame.
+Drag the yellow playback robot directly along the selected route to scrub the
+preview. The timeline slider remains available for fine adjustment.

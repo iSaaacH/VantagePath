@@ -36,19 +36,19 @@
       <section class="editor-grid">
         <aside class="rail path-rail">
           <section class="robot-start-section" id="robot-start-section" aria-labelledby="robot-start-title">
-            <div class="start-heading"><span class="start-symbol">↗</span><h2 id="robot-start-title">Robot start</h2><button data-action="select-start" aria-label="Select robot start on field">Select</button></div>
-            <p>Where the robot is placed before autonomous.</p>
+            <div class="start-heading"><span class="start-symbol">P1</span><h2 id="robot-start-title">Robot start</h2><button data-action="select-start" aria-label="Select P1 on the field">Select P1</button></div>
+            <p>P1 on the first route is where the robot begins. They are the same point.</p>
             <div class="field-pair">
               <label><span>X / in</span><input id="start-x" data-start="x" type="number" min="0" max="144" step="0.25" /></label>
               <label><span>Y / in</span><input id="start-y" data-start="y" type="number" min="0" max="144" step="0.25" /></label>
             </div>
             <label class="start-heading-input"><span>Facing / °</span><input id="start-heading" data-start="heading" type="number" step="1" /></label>
-            <small>0° right · 90° up. Drag the purple outline to move.</small>
+            <small>0° right · 90° up. Drag P1 or edit these fields—both stay in sync.</small>
           </section>
           <div class="rail-heading"><div><span class="section-index">01 / Routes</span><h2>Routes</h2></div><button class="square-button" data-action="new-path" aria-label="Add path">+</button></div>
           <div class="route-toolbar"><span id="route-count"></span><button data-action="duplicate-path">Duplicate</button></div>
           <div id="path-list" class="path-list"></div>
-          <section class="inspector-section route-settings"><label for="route-name">Route name</label><input id="route-name" /><button class="use-start" data-action="use-robot-start">Set first route point to robot start</button><small class="route-start-note">Robot start is separate. Moving it leaves existing routes in place.</small></section>
+          <section class="inspector-section route-settings"><label for="route-name">Route name</label><input id="route-name" /><small class="route-start-note">On the first route, P1 is always the robot start.</small></section>
           <section class="inspector-section segment-list-section">
             <div class="section-label"><span>Route segments</span><small>set each leg</small></div>
             <div class="route-direction-actions"><span>Set entire route</span><div><button data-action="all-forward">→ Forward</button><button data-action="all-reverse">← Reverse</button></div></div>
@@ -81,7 +81,7 @@
           <div class="point-legend" aria-label="Field marker guide">
             <span><i class="legend-point"></i><b>P · Route point</b> Robot passes through</span>
             <span><i class="legend-control"></i><b>C · Control point</b> Bends the curve</span>
-            <span><i class="legend-start"></i><b>Robot start</b> Initial placement</span>
+            <span><i class="legend-start"></i><b>P1</b> Robot start on the first route</span>
           </div>
           <div class="timeline">
             <div><span class="section-index">03 / Preview · estimated</span><strong id="path-summary">3 anchors · 0.0 in</strong></div>

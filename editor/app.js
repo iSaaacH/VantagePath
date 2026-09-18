@@ -1,4 +1,4 @@
-import { dragPosition, FIELD_SIZE, clamp, cppExport, estimateLength, makeDocument, mirrorWaypoint, motionProfile, nearestPathDistance, normalizeSegmentDirections, profileDistance, profileTimeAtDistance, segmentPoint, setControlCount, reverseWaypoints, validateDocument, wrapRadians } from "./model.js";
+import { dragPosition, FIELD_SIZE, clamp, cppExport, estimateLength, makeDocument, mirrorWaypoint, motionProfile, nearestPathDistance, normalizeSegmentDirections, profileDistance, profileTimeAtDistance, robotStartPose, segmentPoint, setControlCount, reverseWaypoints, validateDocument, wrapRadians } from "./model.js";
 
 const STORAGE_KEY = "vantagepath-studio-v1";
 const svg = document.querySelector("#field");
@@ -9,7 +9,6 @@ const waypointList = document.querySelector("#waypoint-list");
 const controlPanel = document.querySelector("#control-panel");
 let selectedSegment = 0;
 let selectedControlId = null;
-let startSelected = false;
 const segmentList = document.querySelector("#segment-list");
 const toast = document.querySelector("#toast");
 const titleNode = document.querySelector("#document-title");
@@ -45,6 +44,7 @@ function persist() {
 
 function commit(message) {
   stopPlayback(true);
+  documentState.robotStart = robotStartPose(documentState);
   const serial = JSON.stringify(documentState);
   if (history[historyIndex] !== serial) {
     history = history.slice(0, historyIndex + 1);
@@ -148,7 +148,7 @@ function togglePlayback() {
 
 function restore(index) {
   if (index < 0 || index >= history.length) return;
-  selectedControlId = null; startSelected = false;
+  selectedControlId = null;
   stopPlayback(true);
   historyIndex = index;
   documentState = JSON.parse(history[index]);
@@ -200,7 +200,7 @@ function pathMarkup(path) {
   const controls = path.waypoints.map((point, index) => {
     const handleX = point.x + Math.cos(point.heading) * point.tangent / 5;
     const handleY = point.y + Math.sin(point.heading) * point.tangent / 5;
-    const selected = !startSelected && !selectedControlId && point.id === selectedPointId;
+    const selected = !selectedControlId && point.id === selectedPointId;
     const legacy = (index > 0 && path.controlPoints[index-1] === null) || (index < path.waypoints.length-1 && path.controlPoints[index] === null);
     return `<g>${legacy ? `<line class="control-line" x1="${point.x}" y1="${FIELD_SIZE - point.y}" x2="${handleX}" y2="${FIELD_SIZE - handleY}"/>
       <circle class="handle" data-handle-id="${point.id}" cx="${handleX}" cy="${FIELD_SIZE - handleY}" r="2"/>` : ""}
@@ -217,24 +217,15 @@ function pathMarkup(path) {
   return `${curves.join("")}${robotMarkup}${bezierControls}${controls}`;
 }
 
-function robotStartMarkup() {
-  const start = documentState.robotStart, robot = documentState.robot;
-  return `<g class="robot-start ${startSelected ? "is-selected" : ""}" transform="translate(${start.x} ${FIELD_SIZE-start.y})">
-    <g transform="rotate(${-start.heading*180/Math.PI})">
-      <rect class="start-outline" data-start-marker="true" x="${-robot.length/2}" y="${-robot.width/2}" width="${robot.length}" height="${robot.width}" rx="1"/>
-      <path class="start-arrow" data-start-marker="true" d="M0 0H${robot.length*.36}m-2 -1.5 2 1.5-2 1.5"/>
-    </g>
-    <text class="anchor-label start-label" x="${-robot.length/2}" y="${-robot.width/2-2}">ROBOT START</text>
-  </g>`;
-}
-
 function render() {
   const path = activePath();
   if (path) normalizeSegmentDirections(path);
   selectedSegment = Math.max(0, Math.min(selectedSegment, (path?.waypoints.length ?? 1)-2));
-  svg.innerHTML = fieldMarkup() + robotStartMarkup() + pathMarkup(path);
-  document.querySelectorAll("[data-start]").forEach(input => { const key = input.dataset.start; input.value = (key === "heading" ? documentState.robotStart.heading * 180 / Math.PI : documentState.robotStart[key]).toFixed(2); });
-  document.querySelector("#robot-start-section").classList.toggle("is-selected", startSelected);
+  svg.innerHTML = fieldMarkup() + pathMarkup(path);
+  const start = robotStartPose(documentState);
+  document.querySelectorAll("[data-start]").forEach(input => { const key = input.dataset.start; input.value = (key === "heading" ? start.heading * 180 / Math.PI : start[key]).toFixed(2); });
+  const primaryPoint = documentState.paths[0]?.waypoints[0];
+  document.querySelector("#robot-start-section").classList.toggle("is-selected", activePathId === documentState.paths[0]?.id && selectedPointId === primaryPoint?.id);
   titleNode.textContent = documentState.title;
   pathList.innerHTML = documentState.paths.map((item, index) => `<div class="path-item ${item.id === activePathId ? "is-active" : ""}">
     <button class="path-select" data-path-id="${item.id}" aria-label="Edit ${escapeHtml(item.name)}"><i class="path-swatch" style="background:${escapeHtml(item.color)}"></i><span><strong>${escapeHtml(item.name)}</strong><small>${Math.max(0,item.waypoints.length-1)} segments · ${(item.controlPoints ?? []).flat().filter(Boolean).length} controls</small></span><b>${String(index + 1).padStart(2,"0")}</b></button>
@@ -245,7 +236,7 @@ function render() {
   document.querySelector("#route-count").textContent = `${documentState.paths.length} routes`;
   renderControls(path);
   const point = selectedPoint();
-  document.querySelector("#waypoint-inspector").hidden = startSelected || Boolean(selectedControlId);
+  document.querySelector("#waypoint-inspector").hidden = Boolean(selectedControlId);
   document.querySelector("#waypoint-inspector").style.opacity = point ? "1" : ".4";
   Object.values(pointInputs).forEach((input) => { input.disabled = !point; });
   if (point) {
@@ -256,7 +247,6 @@ function render() {
     document.querySelector("#selection-index").textContent = `P${String(index + 1).padStart(2,"0")}`;
   }
   if (selectedControlId) document.querySelector("#selection-index").textContent = `Control C${(path?.controlPoints[selectedSegment] ?? []).findIndex(p => p.id === selectedControlId)+1}`;
-  if (startSelected) document.querySelector("#selection-index").textContent = "Robot start";
   document.querySelector("#waypoint-count").textContent = `${path?.waypoints.length ?? 0} ${(path?.waypoints.length ?? 0) === 1 ? "point" : "points"}`;
   waypointList.innerHTML = (path?.waypoints ?? []).map((item, index) => `<div class="waypoint-row ${item.id === selectedPointId ? "is-selected" : ""}">
     <button class="waypoint-select" data-select-point-id="${item.id}" aria-label="Select anchor ${index + 1}">P${String(index + 1).padStart(2,"0")}</button>
@@ -313,7 +303,7 @@ function renderControls(path) {
 document.querySelector("#route-name").addEventListener("change", event => {
   if (activePath()) { activePath().name = event.target.value.trim() || "Untitled route"; commit("Route renamed"); }
 });
-document.querySelector("#segment-select").addEventListener("change", event => { startSelected = false; selectedSegment = Number(event.target.value); selectedControlId = null; render(); });
+document.querySelector("#segment-select").addEventListener("change", event => { selectedSegment = Number(event.target.value); selectedControlId = null; render(); });
 document.querySelector("#segment-direction").addEventListener("change", event => {
   activePath().segmentReversed[selectedSegment] = event.target.value === "true"; commit("Drive direction updated");
 });
@@ -325,13 +315,11 @@ document.querySelector("#geometry-mode").addEventListener("change", event => {
 document.querySelector("#control-count").addEventListener("change", event => {
   const count = Number(event.target.value);
   if (!event.target.value || !Number.isInteger(count) || count < 0) return render();
-  startSelected = false;
   setControlCount(activePath(), selectedSegment, count); selectedControlId = null; commit("Control point count updated");
 });
 controlPanel.addEventListener("change", event => {
   const input = event.target.closest("[data-control-coordinate]"); if (!input) return;
   const value = Number(input.value); if (!input.value || !Number.isFinite(value)) return render();
-  startSelected = false;
   const point = activePath().controlPoints[selectedSegment][Number(input.dataset.controlIndex)];
   point[input.dataset.controlCoordinate] = clamp(value); selectedControlId = point.id; commit("Control point updated");
 });
@@ -345,7 +333,7 @@ function svgCoordinates(event) {
 function addPoint(at = { x: 72, y: 72 }) {
   const path = activePath();
   if (!path) return;
-  startSelected = false; selectedControlId = null;
+  selectedControlId = null;
   const previous = path.waypoints.at(-1);
   const heading = previous ? Math.atan2(at.y - previous.y, at.x - previous.x) : 0;
   const point = { id: uid(), x: snap(at.x), y: snap(at.y), heading, tangent: previous ? Math.max(18, Math.hypot(at.x - previous.x, at.y - previous.y)) : 30 };
@@ -353,7 +341,6 @@ function addPoint(at = { x: 72, y: 72 }) {
 }
 
 function deletePoint() {
-  if (startSelected) return notify("Robot start is edited in its own section");
   const path = activePath();
   if (selectedControlId && path) {
     const items = path.controlPoints[selectedSegment];
@@ -401,13 +388,12 @@ function download(name, content, type) {
 function safeFileName(value) { return value.trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") || "vantage-path"; }
 
 function runAction(action) {
-  if (action === "select-start") { startSelected = true; selectedControlId = null; stopPlayback(true); render(); return; }
-  if (action === "use-robot-start") {
-    const point = activePath()?.waypoints[0]; if (!point) return notify("Add a route point first");
-    Object.assign(point, documentState.robotStart); startSelected = false; selectedControlId = null; selectedPointId = point.id;
-    return commit("First route point placed at robot start");
+  if (action === "select-start") {
+    const primary = documentState.paths[0], point = primary?.waypoints[0];
+    if (!point) return notify("Add a route point first");
+    activePathId = primary.id; selectedPointId = point.id; selectedSegment = 0; selectedControlId = null;
+    stopPlayback(true); render(); return;
   }
-  if (["new-path", "add-point", "add-control", "duplicate-path"].includes(action)) startSelected = false;
   if (action === "select-tool") { notify("Select tool active"); return; }
   if (action === "duplicate-path") {
     const original = activePath(); if (!original) return;
@@ -460,25 +446,25 @@ document.addEventListener("click", (event) => {
   const remove = event.target.closest("[data-remove-control]");
   if (remove) { activePath().controlPoints[selectedSegment].splice(Number(remove.dataset.removeControl),1); selectedControlId = null; commit("Control point removed"); }
   const control = event.target.closest("[data-select-control]");
-  if (control) { startSelected = false; selectedControlId = control.dataset.selectControl; render(); }
+  if (control) { selectedControlId = control.dataset.selectControl; render(); }
   const pathButton = event.target.closest("[data-path-id]");
-  if (pathButton) { startSelected = false; stopPlayback(true); activePathId = pathButton.dataset.pathId; selectedSegment = 0; selectedControlId = null; selectedPointId = activePath()?.waypoints[0]?.id ?? null; render(); }
+  if (pathButton) { stopPlayback(true); activePathId = pathButton.dataset.pathId; selectedSegment = 0; selectedControlId = null; selectedPointId = activePath()?.waypoints[0]?.id ?? null; render(); }
   const segmentButton = event.target.closest("[data-segment-index]");
   if (segmentButton) {
     const path = activePath(); const index = Number(segmentButton.dataset.segmentIndex);
-    if (path?.segmentReversed[index] !== undefined) { startSelected = false; selectedSegment = index; selectedControlId = null; render(); }
+    if (path?.segmentReversed[index] !== undefined) { selectedSegment = index; selectedControlId = null; render(); }
   }
   const directionButton = event.target.closest("[data-direction-index]");
   if (directionButton) {
     const path = activePath(); const index = Number(directionButton.dataset.directionIndex);
     if (path?.segmentReversed[index] !== undefined) {
-      startSelected = false; selectedSegment = index; selectedControlId = null;
+      selectedSegment = index; selectedControlId = null;
       path.segmentReversed[index] = directionButton.dataset.directionValue === "true";
       commit(`Segment ${index+1} set to ${path.segmentReversed[index] ? "reverse" : "forward"}`);
     }
   }
   const pointButton = event.target.closest("[data-select-point-id]");
-  if (pointButton) { startSelected = false; selectedControlId = null; selectedPointId = pointButton.dataset.selectPointId; stopPlayback(true); render(); }
+  if (pointButton) { selectedControlId = null; selectedPointId = pointButton.dataset.selectPointId; stopPlayback(true); render(); }
   const alliance = event.target.closest("[data-alliance]")?.dataset.alliance;
   if (alliance) { documentState.alliance = alliance; commit(`${alliance[0].toUpperCase()+alliance.slice(1)} field view selected`); }
 });
@@ -489,7 +475,6 @@ waypointList.addEventListener("change", (event) => {
   const point = activePath()?.waypoints.find((item) => item.id === input.dataset.coordinatePointId);
   const value = Number(input.value);
   if (!point || !Number.isFinite(value)) return render();
-  startSelected = false;
   point[input.dataset.coordinate] = clamp(value);
   selectedControlId = null;
   selectedPointId = point.id;
@@ -497,7 +482,7 @@ waypointList.addEventListener("change", (event) => {
 });
 
 svg.addEventListener("pointerdown", event => {
-  const target = event.target.closest("[data-point-id],[data-handle-id],[data-control-id],[data-start-marker],[data-playback-marker]");
+  const target = event.target.closest("[data-point-id],[data-handle-id],[data-control-id],[data-playback-marker]");
   if (!target) return;
   if (target.dataset.playbackMarker) {
     stopPlayback(false);
@@ -509,12 +494,11 @@ svg.addEventListener("pointerdown", event => {
     updatePlaybackUi(); event.preventDefault(); return;
   }
   stopPlayback(true);
-  const { pointId, handleId, controlId, startMarker } = target.dataset;
-  startSelected = Boolean(startMarker); selectedControlId = controlId ?? null;
+  const { pointId, handleId, controlId } = target.dataset;
+  selectedControlId = controlId ?? null;
   if (pointId || handleId) selectedPointId = pointId ?? handleId;
-  const point = startSelected ? documentState.robotStart : controlId
-    ? activePath().controlPoints[selectedSegment].find(p => p.id === controlId) : selectedPoint();
-  const type = startSelected ? "start" : controlId ? "control" : handleId ? "handle" : "point";
+  const point = controlId ? activePath().controlPoints[selectedSegment].find(p => p.id === controlId) : selectedPoint();
+  const type = controlId ? "control" : handleId ? "handle" : "point";
   const origin = type === "handle" ? { x:point.x+Math.cos(point.heading)*point.tangent/5, y:point.y+Math.sin(point.heading)*point.tangent/5 } : { x:point.x, y:point.y };
   drag = { type, point, pointerId:event.pointerId, pointerStart:svgCoordinates(event), origin, before:JSON.stringify(documentState) };
   svg.setPointerCapture(event.pointerId); render(); event.preventDefault();
@@ -541,7 +525,8 @@ svg.addEventListener("pointermove", event => {
 svg.addEventListener("pointerup", event => {
   if (drag?.pointerId !== event.pointerId) return;
   if (drag.type === "playback") { drag = null; updatePlaybackUi(); return; }
-  const message = drag.type === "start" ? "Robot start updated" : drag.type === "control" ? "Control point updated" : "Route point updated";
+  const primaryPoint = documentState.paths[0]?.waypoints[0];
+  const message = drag.type === "control" ? "Control point updated" : drag.point === primaryPoint ? "Robot start / P1 updated" : "Route point updated";
   drag = null; commit(message);
 });
 svg.addEventListener("pointercancel", () => {
@@ -549,7 +534,7 @@ svg.addEventListener("pointercancel", () => {
   if (drag.type === "playback") { drag = null; updatePlaybackUi(); return; }
   documentState = JSON.parse(drag.before); drag = null; render();
 });
-svg.addEventListener("dblclick", (event) => { if (!event.target.closest("[data-point-id],[data-handle-id],[data-control-id],[data-start-marker],[data-playback-marker]")) addPoint(svgCoordinates(event)); });
+svg.addEventListener("dblclick", (event) => { if (!event.target.closest("[data-point-id],[data-handle-id],[data-control-id],[data-playback-marker]")) addPoint(svgCoordinates(event)); });
 
 for (const [key,input] of Object.entries(pointInputs)) input.addEventListener("change", () => {
   const point=selectedPoint(); if(!point) return;
@@ -576,9 +561,11 @@ scrubber.addEventListener("input", () => {
 
 document.querySelectorAll("[data-start]").forEach(input => input.addEventListener("change", () => {
   const value = Number(input.value); if (!input.value || !Number.isFinite(value)) return render();
+  const point = documentState.paths[0]?.waypoints[0]; if (!point) return notify("Add a route point first");
   const key = input.dataset.start;
-  documentState.robotStart[key] = key === "heading" ? wrapRadians(value*Math.PI/180) : clamp(value);
-  startSelected = true; selectedControlId = null; commit("Robot start updated");
+  point[key] = key === "heading" ? wrapRadians(value*Math.PI/180) : clamp(value);
+  activePathId = documentState.paths[0].id; selectedPointId = point.id; selectedControlId = null;
+  commit("Robot start / P1 updated");
 }));
 document.querySelector("#snap-step").addEventListener("change", event => { documentState.snapStep = Number(event.target.value); commit(); });
 
@@ -590,7 +577,7 @@ fileInput.addEventListener("change", async () => {
   try {
     if (!fileInput.files.length) return;
     const loaded=validateDocument(JSON.parse(await fileInput.files[0].text()));
-    stopPlayback(true); selectedSegment = 0; selectedControlId = null; startSelected = false; documentState=loaded;
+    stopPlayback(true); selectedSegment = 0; selectedControlId = null; documentState=loaded;
     activePathId=loaded.paths[0]?.id??null;selectedPointId=loaded.paths[0]?.waypoints[0]?.id??null;history=[JSON.stringify(loaded)];historyIndex=0;persist();render();notify("VantagePath file opened");
   } catch(error) { notify(error instanceof Error ? error.message : "Could not open that file"); }
   fileInput.value="";

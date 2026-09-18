@@ -210,7 +210,10 @@ export function quinticPoint(start, end, t, reversed = false) {
 }
 
 export function robotStartPose(document) {
-  const source = document.robotStart ?? document.paths[0]?.waypoints[0] ?? { x:18, y:18, heading:0 };
+  // P1 on the first route is the single source of truth for initial placement.
+  // robotStart remains in the document for backwards compatibility with older
+  // consumers, but it must never drift away from the first route point.
+  const source = document.paths[0]?.waypoints[0] ?? document.robotStart ?? { x:18, y:18, heading:0 };
   return { x:source.x, y:source.y, heading:source.heading };
 }
 

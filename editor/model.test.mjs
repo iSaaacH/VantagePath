@@ -75,25 +75,24 @@ assert.deepEqual(validateDocument(oldDoc).paths[0].controlPoints, [null, null], 
 route.controlPoints[0][0].x = NaN;
 assert.throws(() => validateDocument(bezierDoc), /Control coordinates/);
 
-// Start placement persists independently of route geometry, including old files.
+// P1 on the first route is the canonical robot start, including old files.
 const startDocument = makeDocument();
-const routeBeforeStartEdit = structuredClone(startDocument.paths);
 startDocument.robotStart = {x:30.25,y:48.5,heading:Math.PI/2};
-assert.deepEqual(startDocument.paths,routeBeforeStartEdit);
+startDocument.paths[0].waypoints[0] = {...startDocument.paths[0].waypoints[0],x:30.25,y:48.5,heading:Math.PI/2};
 const startReloaded = validateDocument(JSON.parse(JSON.stringify(startDocument)));
-assert.deepEqual(startReloaded.robotStart,startDocument.robotStart);
+assert.deepEqual(startReloaded.robotStart,{x:30.25,y:48.5,heading:Math.PI/2});
 assert.equal(startReloaded.snapStep,0.25);
 const startLegacy = makeDocument(); delete startLegacy.robotStart; delete startLegacy.snapStep;
 startLegacy.paths[0].waypoints[0].x = 37;
 assert.equal(validateDocument(startLegacy).robotStart.x,37);
 assert.equal(startLegacy.snapStep,0.25);
 startLegacy.paths[0].waypoints[0].x = 60;
-assert.equal(startLegacy.robotStart.x,37,'migrated start is a separate object');
+assert.equal(validateDocument(startLegacy).robotStart.x,60,'P1 remains the canonical start');
 assert.match(cppExport(startDocument,'autoRoute'), /const vantage::Pose2d autoRouteRobotStart = \{30\.2500, 48\.5000, 1\.570796\}/);
 assert.match(cppExport(startDocument,'autoRoute','gps'), /autoRouteRobotStartGps = \{-1\.0604, -0\.5969, 0\.000000\}/);
 assert.match(cppExport(startDocument,'autoRoute','gps'), /vantage::vexGpsToCorner\(autoRouteRobotStartGps/);
 startDocument.robotStart.x = Infinity;
-assert.throws(()=>validateDocument(startDocument),/Robot start/);
+assert.equal(validateDocument(startDocument).robotStart.x,30.25,'stale standalone start data is replaced by P1');
 
 // A short pointer movement stays short, preserves the grab offset and supports fine mode.
 assert.deepEqual(dragPosition({x:20,y:30},{x:21,y:31},{x:22,y:32}),{x:21,y:31});
