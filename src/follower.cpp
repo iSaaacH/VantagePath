@@ -18,6 +18,7 @@ TrajectoryFollower::TrajectoryFollower(FollowerConfig config)
     throw std::invalid_argument("invalid follower voltage or settle cycle count");
   }
   for (double value : {config.maxWheelVelocity, config.maxWheelAcceleration,
+                      config.minimumTrackingVelocity,
                       config.terminalMaxPositionError, config.terminalProgressTimeout,
                       config.positionTolerance, config.headingTolerance,
                       config.velocityTolerance, config.timeoutAfterTrajectory,
@@ -317,6 +318,24 @@ FollowerOutput TrajectoryFollower::update(
     }
   }
   output.terminalPhase = terminalPhase_;
+  // Do not override endpoint capture, braking, reverse corrections or a badly
+  // misaligned pose. Scale the complete twist to preserve its turning radius.
+  // The reference-speed bound retains launch/deceleration instead of forcing
+  // a minimum command through a stopped endpoint.
+  if (!terminalRecovery && output.pointApproachBlend == 0.0 &&
+      config_.minimumTrackingVelocity > 0.0 &&
+      std::abs(command.linear) > 1e-6 &&
+      command.linear * reference.velocity > 0.0 &&
+      std::abs(output.poseError.heading) < kPi / 3.0) {
+    const double floor = std::min(config_.minimumTrackingVelocity,
+                                  std::abs(reference.velocity)) *
+                         std::cos(output.poseError.heading);
+    if (std::abs(command.linear) < floor) {
+      const double scale = floor / std::abs(command.linear);
+      command.linear *= scale;
+      command.angular *= scale;
+    }
+  }
   output.chassisSetpoint = command;
   output.wheelSetpoint = kinematics_.toWheelSpeeds(command);
   const double peakSpeed = std::max(std::abs(output.wheelSetpoint.left), std::abs(output.wheelSetpoint.right));

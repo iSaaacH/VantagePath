@@ -32,6 +32,9 @@ struct FollowerConfig {
   // Optional corrected-command limits, in the same distance units as the path.
   double maxWheelVelocity = 0.0;
   double maxWheelAcceleration = 0.0;
+  // Optional tracking velocity floor (distance units/s). Reference ramp,
+  // heading alignment, endpoint approach and wheel limits take priority.
+  double minimumTrackingVelocity = 0.0;
   // Zero disables these additional recovery guards (legacy library clients).
   double terminalMaxPositionError = 0.0;
   double terminalProgressTimeout = 0.0;
