@@ -303,6 +303,19 @@ Trajectory generateTrajectory(const std::vector<Waypoint>& waypoints,
   }
 
   std::vector<double> velocity(samples.size(), config.maxVelocity);
+  if (config.pathSpeedScale) {
+    std::vector<double> scales(samples.size(), 1.0);
+    const double length = samples.back().distance;
+    for (std::size_t i = 0; i < samples.size(); ++i) {
+      scales[i] = config.pathSpeedScale(length > 1e-9 ? samples[i].distance / length * 100.0 : 100.0);
+      if (!std::isfinite(scales[i]) || scales[i] <= 0 || scales[i] > 1)
+        throw std::invalid_argument("pathSpeedScale must return a finite fraction in (0,1]");
+    }
+    for (std::size_t i = 0; i < samples.size(); ++i) {
+      // Lower the preceding sample too, bounding interpolation at a step down.
+      velocity[i] = config.maxVelocity * std::min(scales[i], scales[std::min(i+1, samples.size()-1)]);
+    }
+  }
   for (std::size_t i = 0; i < samples.size(); ++i) {
     const double curvature = std::abs(samples[i].curvature);
     // Bound both endpoints of each interpolation interval. Limiting only the

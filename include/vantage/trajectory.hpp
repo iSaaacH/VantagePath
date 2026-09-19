@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <vector>
+#include <functional>
 
 #include "vantage/geometry.hpp"
 
@@ -42,6 +43,8 @@ struct TrajectoryConfig {
   // Optional planned |angular velocity| ceiling in rad/s. Zero disables it.
   // Applies to the reference trajectory, not follower feedback corrections.
   double maxAngularVelocity = 0.0;
+  // Arc-length percent -> fraction of maxVelocity (0,1], before braking passes.
+  std::function<double(double)> pathSpeedScale = {};
 };
 
 struct TrajectoryState {
