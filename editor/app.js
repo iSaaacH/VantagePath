@@ -112,6 +112,8 @@ function updatePlaybackUi() {
   button.textContent = playback.playing ? "❚❚" : "▶";
   button.setAttribute("aria-label", playback.playing ? "Pause path" : "Play full path");
   const pose = poseAtDistance(samples, profileDistance(profile, playback.time), activePath());
+  const heading = pose?.heading ?? documentState.robotStart.heading;
+  document.querySelector("#heading-readout").textContent = `θ ${(wrapRadians(heading) * 180 / Math.PI).toFixed(1)}°`;
   const robot = document.querySelector("#playback-robot");
   if (robot) {
     robot.style.display = samples.length > 1 ? "" : "none";
