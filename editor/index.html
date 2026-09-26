@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f1ede4" />
     <title>VantagePath Studio</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=route-headings-1" />
   </head>
   <body>
     <main class="app-shell">
@@ -131,7 +131,7 @@
 
           <section class="inspector-section waypoint-list-section">
             <div class="section-label"><span>Route points · robot passes through</span><small id="waypoint-count">0 points</small></div>
-            <div class="waypoint-list-heading" aria-hidden="true"><span>Point</span><span>X / in</span><span>Y / in</span></div>
+            <div class="waypoint-list-heading" aria-hidden="true"><span>Point</span><span>X / in</span><span>Y / in</span><span>θ / °</span></div>
             <div id="waypoint-list" class="waypoint-list"></div>
           </section>
 
@@ -191,6 +191,6 @@
       </section>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
     </main>
-    <script type="module" src="app.js"></script>
+    <script type="module" src="app.js?v=route-headings-1"></script>
   </body>
 </html>

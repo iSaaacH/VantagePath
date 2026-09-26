@@ -88,7 +88,9 @@ button:disabled { cursor:not-allowed; opacity:.35; }
 .field-pair label { display:flex; flex-direction:column; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:8px; gap:5px; text-transform:uppercase; }
 .field-pair input { background:transparent; border:0; border-bottom:1px solid var(--ink); font-size:15px; min-width:0; padding:6px 0; width:100%; }
 .waypoint-list-section { background:rgba(37,70,255,.025); }
-.waypoint-list-heading,.waypoint-row { align-items:center; display:grid; gap:9px; grid-template-columns:42px 1fr 1fr; }
+.waypoint-list-heading,.waypoint-row { align-items:center; display:grid; gap:6px; grid-template-columns:32px minmax(0,1fr) minmax(0,1fr) 56px; }
+.waypoint-list-heading { padding-left:9px; }
+.waypoint-heading { color:var(--blue); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap; }
 .waypoint-list-heading { color:var(--muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:7px; margin-top:15px; text-transform:uppercase; }
 .waypoint-list { display:grid; gap:4px; margin-top:5px; }
 .waypoint-row { border-left:3px solid transparent; padding:3px 0 3px 6px; }

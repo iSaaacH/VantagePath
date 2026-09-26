@@ -250,11 +250,17 @@ function render() {
   }
   if (selectedControlId) document.querySelector("#selection-index").textContent = `Control C${(path?.controlPoints[selectedSegment] ?? []).findIndex(p => p.id === selectedControlId)+1}`;
   document.querySelector("#waypoint-count").textContent = `${path?.waypoints.length ?? 0} ${(path?.waypoints.length ?? 0) === 1 ? "point" : "points"}`;
-  waypointList.innerHTML = (path?.waypoints ?? []).map((item, index) => `<div class="waypoint-row ${item.id === selectedPointId ? "is-selected" : ""}">
+  const headingSamples = pathSamples(path);
+  waypointList.innerHTML = (path?.waypoints ?? []).map((item, index) => {
+    const sample = index === 0 ? headingSamples[0] : headingSamples.findLast(sample => sample.segmentIndex === index - 1);
+    const heading = poseAtDistance(headingSamples, sample?.distance ?? 0, path)?.heading ?? item.heading;
+    return `<div class="waypoint-row ${item.id === selectedPointId ? "is-selected" : ""}">
     <button class="waypoint-select" data-select-point-id="${item.id}" aria-label="Select anchor ${index + 1}">P${String(index + 1).padStart(2,"0")}</button>
     <label><span class="visually-hidden">Anchor ${index + 1} X coordinate in inches</span><input data-coordinate-point-id="${item.id}" data-coordinate="x" type="number" min="0" max="144" step="0.25" value="${item.x.toFixed(2)}" /></label>
     <label><span class="visually-hidden">Anchor ${index + 1} Y coordinate in inches</span><input data-coordinate-point-id="${item.id}" data-coordinate="y" type="number" min="0" max="144" step="0.25" value="${item.y.toFixed(2)}" /></label>
-  </div>`).join("");
+    <output class="waypoint-heading" aria-label="Route point ${index + 1} heading in degrees" title="Preview heading at P${index + 1} · 0° right · 90° up">${(wrapRadians(heading) * 180 / Math.PI).toFixed(1)}°</output>
+  </div>`;
+  }).join("");
   segmentList.innerHTML = (path?.segmentReversed ?? []).map((reversed, index) => `<div class="segment-direction ${index === selectedSegment ? "is-current" : ""}">
     <button class="segment-select-button" data-segment-index="${index}" aria-pressed="${index === selectedSegment}">
       <span><b>Segment ${index+1} · P${index+1} → P${index+2}</b><small>${path.controlPoints[index] === null ? "Legacy spline" : `${path.controlPoints[index].length} controls`}</small></span>
