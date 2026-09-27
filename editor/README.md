@@ -11,10 +11,18 @@ step. Documents autosave in the browser and can be downloaded as `.vpath`
 JSON. C++ export supports the bottom-left corner authoring frame or the official
 VEX GPS centre frame.
 
-Run the pure model tests with:
+Run the editor tests with:
 
 ```sh
-node --test editor/model.test.mjs
+node --test editor/*.test.mjs
+```
+
+`planner.js` is a port of the geometry and speed passes in `src/trajectory.cpp`,
+so preview times and stops match what the robot runs. Check that the two still
+agree, and that every exported header compiles and generates, with:
+
+```sh
+node tests/studio/crosscheck.mjs   # needs a C++17 compiler (CXX to choose)
 ```
 
 ## Routes and control points
@@ -56,3 +64,30 @@ includes a separate `…RobotStart` `Pose2d` for initializing localization; GPS
 export includes both the GPS pose and its conversion to the trajectory frame.
 Drag the yellow playback robot directly along the selected route to scrub the
 preview. The timeline slider remains available for fine adjustment.
+
+Browser and schema tests live in `tests/studio` (Playwright and Ajv):
+
+```sh
+npm --prefix tests/studio ci
+npx --prefix tests/studio playwright install chromium
+node tests/studio/schema.mjs
+node tests/studio/e2e.mjs       # PW_CHANNEL=chrome to use installed Chrome
+```
+
+`.vpath` files are described by [`vpath.schema.json`](vpath.schema.json)
+(format 2). Studio still opens format 1 files and upgrades them.
+
+## Code layout
+
+| File | Role |
+|---|---|
+| `model.js` | Document format, geometry helpers and validation |
+| `export.js` | C++ export: library trajectories or a VantageChassis run function |
+| `log-overlay.js` | Odometry CSV overlay and deviation from the plan |
+| `planner.js` | Port of `trajectory.cpp`: sections, stops, speed and timing |
+| `analysis.js` | Route checks: corners, tight curves, wall hits |
+| `route-edits.js` | Pure route edits (append, insert, delete, mirror, …) |
+| `store.js` | Document, selection, undo history and autosave |
+| `views/*.js` | HTML/SVG markup for the field, outline, inspector and timeline |
+| `app.js` | Wires DOM events to the store, edits and views |
+

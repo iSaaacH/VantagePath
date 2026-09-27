@@ -1,0 +1,15 @@
+{
+  "name": "vantagepath-studio-tests",
+  "private": true,
+  "type": "module",
+  "description": "Browser and schema tests for VantagePath Studio. Unit tests need no install: node --test editor/*.test.mjs",
+  "scripts": {
+    "e2e": "node e2e.mjs",
+    "schema": "node schema.mjs",
+    "crosscheck": "node crosscheck.mjs"
+  },
+  "devDependencies": {
+    "ajv": "^8.17.1",
+    "playwright": "^1.55.0"
+  }
+}

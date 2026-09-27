@@ -10,7 +10,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: node --test editor/model.test.mjs
+      - run: node --test editor/*.test.mjs
       - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build --parallel
       - run: ctest --test-dir build --output-on-failure
+      - name: Studio export compiles and matches the C++ planner
+        run: node tests/studio/crosscheck.mjs
+
+  studio:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tests/studio/package-lock.json
+      - run: npm ci --prefix tests/studio
+      - name: Saved documents match vpath.schema.json
+        run: node tests/studio/schema.mjs
+      - run: npx --prefix tests/studio playwright install --with-deps chromium
+      - name: Studio end-to-end in Chromium
+        run: node tests/studio/e2e.mjs

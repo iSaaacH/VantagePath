@@ -2,195 +2,177 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#f1ede4" />
     <title>VantagePath Studio</title>
-    <link rel="stylesheet" href="styles.css?v=route-headings-1" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23171715'/%3E%3Ctext x='16' y='21' font-family='monospace' font-size='13' font-weight='700' fill='%23d9ff48' text-anchor='middle'%3EVP%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="styles.css?v=studio-3" />
   </head>
   <body>
-    <main class="app-shell">
+    <div class="studio">
       <header class="topbar">
-        <button class="brand" data-action="home" aria-label="VantagePath home">
-          <span class="brand-mark">VP</span><span>VantagePath / Studio</span>
-        </button>
-        <nav class="mode-nav" aria-label="Editor mode">
-          <button class="is-active" data-action="select-tool">Path editor</button>
-        </nav>
+        <div class="brand-block">
+          <span class="brand-mark" aria-hidden="true">VP</span>
+          <div class="title-stack">
+            <span class="eyebrow">VantagePath Studio · Override 2026–27</span>
+            <strong id="document-title" contenteditable="true" spellcheck="false" role="textbox" aria-label="Document title">Competition auto</strong>
+          </div>
+        </div>
+        <div class="topbar-tools">
+          <button class="sheet-toggle" data-sheet="outline" aria-controls="outline" aria-expanded="false">Routes</button>
+          <div class="segmented alliance-switch" role="group" aria-label="Alliance view">
+            <button data-alliance="red"><i class="dot red"></i>Red</button><button data-alliance="blue"><i class="dot blue"></i>Blue</button><button data-alliance="skills">Skills</button>
+          </div>
+          <div class="icon-group" role="group" aria-label="History">
+            <button data-action="undo" aria-label="Undo" title="Undo (⌘Z)">↶</button><button data-action="redo" aria-label="Redo" title="Redo (⇧⌘Z)">↷</button>
+          </div>
+          <button class="sheet-toggle" data-sheet="inspector" aria-controls="inspector" aria-expanded="false">Inspect</button>
+        </div>
         <div class="file-actions">
+          <span class="save-state" id="save-state" role="status"><i></i><span>Saved in browser</span></span>
           <button data-action="open">Open</button>
-          <button data-action="save">Save .vpath</button>
-          <button class="primary" data-action="export">Export C++ ↗</button>
+          <button data-action="save">Save</button>
+          <button data-action="open-settings" aria-haspopup="dialog">Settings</button>
+          <button class="primary" data-action="open-export" aria-haspopup="dialog">Export C++</button>
           <input id="file-input" type="file" accept=".vpath,.json,application/json" hidden />
         </div>
       </header>
 
-      <section class="context-strip">
-        <div><span class="section-index">V5RC Override · 2026–27 · Manual 1.1</span><strong id="document-title" contenteditable="true" spellcheck="false">Competition auto</strong></div>
-        <dl>
-          <div><dt>Origin</dt><dd>Bottom-left <span>(0, 0)</span></dd></div>
-          <div><dt>Field</dt><dd>144 × 144 <span>in</span></dd></div>
-          <div><dt>Autosave</dt><dd class="live-state"><i></i> Local</dd></div>
-        </dl>
-      </section>
-
-      <section class="editor-grid">
-        <aside class="rail path-rail">
-          <section class="robot-start-section" id="robot-start-section" aria-labelledby="robot-start-title">
-            <div class="start-heading"><span class="start-symbol">P1</span><h2 id="robot-start-title">Robot start</h2><button data-action="select-start" aria-label="Select P1 on the field">Select P1</button></div>
-            <p>P1 on the first route is where the robot begins. They are the same point.</p>
-            <div class="field-pair">
-              <label><span>X / in</span><input id="start-x" data-start="x" type="number" min="0" max="144" step="0.25" /></label>
-              <label><span>Y / in</span><input id="start-y" data-start="y" type="number" min="0" max="144" step="0.25" /></label>
-            </div>
-            <label class="start-heading-input"><span>Facing / °</span><input id="start-heading" data-start="heading" type="number" step="1" /></label>
-            <small>0° right · 90° up. Drag P1 or edit these fields—both stay in sync.</small>
-          </section>
-          <div class="rail-heading"><div><span class="section-index">01 / Routes</span><h2>Routes</h2></div><button class="square-button" data-action="new-path" aria-label="Add path">+</button></div>
-          <div class="route-toolbar"><span id="route-count"></span><button data-action="duplicate-path">Duplicate</button></div>
-          <div id="path-list" class="path-list"></div>
-          <section class="inspector-section route-settings"><label for="route-name">Route name</label><input id="route-name" /><small class="route-start-note">On the first route, P1 is always the robot start.</small></section>
-          <section class="inspector-section segment-list-section">
-            <div class="section-label"><span>Route segments</span><small>set each leg</small></div>
-            <div class="route-direction-actions"><span>Set entire route</span><div><button data-action="all-forward">→ Forward</button><button data-action="all-reverse">← Reverse</button></div></div>
-            <div id="segment-list" class="segment-list"></div>
-          </section>
-          <div class="rail-note"><span>Corner coordinate model</span><p>The canvas is authored from the bottom-left. GPS export converts to VEX’s official centre origin and compass heading.</p></div>
+      <div class="workspace">
+        <aside id="outline" class="sheet outline" aria-label="Routes">
+          <div class="sheet-head"><h2>Routes</h2><button class="icon-button accent" data-action="new-path" aria-label="New route" title="New route">＋</button><button class="icon-button sheet-close" data-close-sheet aria-label="Close routes">×</button></div>
+          <section id="route-budget"></section>
+          <section id="robot-start"></section>
+          <ol id="route-tree" class="route-tree"></ol>
         </aside>
 
-        <section class="canvas-panel">
+        <main class="stage" aria-label="Field editor">
           <div class="canvas-toolbar">
-            <div class="tool-group" aria-label="Edit tools">
-              <button class="tool is-active" data-action="select-tool" title="Select (V)">↖ <span>Select</span></button>
-              <button class="tool" data-action="add-point" title="Add route point (A)">＋ <span>Route point</span></button>
-              <button class="tool" data-action="delete-point" title="Delete selected">− <span>Delete</span></button>
+            <div class="tool-group">
+              <button class="tool" data-action="add-point" title="Add a point after the last one (A)">＋ Point</button>
+              <button class="tool" data-action="delete-point" title="Delete the selected point or control (Delete)">− Delete</button>
+              <span class="icon-group phone-only" role="group" aria-label="History"><button data-action="undo" aria-label="Undo">↶</button><button data-action="redo" aria-label="Redo">↷</button></span>
             </div>
             <div class="tool-group">
-              <button data-action="undo" title="Undo">↶</button><button data-action="redo" title="Redo">↷</button>
-              <label class="compact-check"><input id="snap-toggle" type="checkbox" checked /><span>Snap</span></label>
+              <label class="check-chip"><input id="snap-toggle" type="checkbox" checked /><span>Snap</span></label>
               <select id="snap-step" aria-label="Snap distance"><option value="0.25">¼″</option><option value="1">1″</option><option value="6">6″</option></select>
-              <label class="compact-check"><input id="zone-toggle" type="checkbox" checked /><span>Zones</span></label>
+              <label class="check-chip"><input id="zone-toggle" type="checkbox" checked /><span>Zones</span></label>
+              <label class="check-chip" title="Draw the robot's outline along the route"><input id="footprint-toggle" type="checkbox" /><span>Footprint</span></label>
+              <select id="heading-mode" aria-label="Heading convention" title="How headings are shown and typed. Export always writes library radians.">
+                <option value="math">θ 0° right · CCW</option>
+                <option value="compass">θ 0° up · CW</option>
+              </select>
             </div>
           </div>
           <div class="field-stage" id="field-stage">
             <svg id="field" viewBox="-9 -9 162 162" role="img" aria-label="Interactive VEX Override field path editor"></svg>
-            <div class="axis axis-x">X → 144″</div><div class="axis axis-y">Y → 144″</div>
-            <div class="coordinate-readout" id="coordinate-readout">X 0.0 · Y 0.0</div>
-            <output class="heading-readout" id="heading-readout" aria-label="Preview robot heading" title="Preview heading · 0° right · 90° up">θ 0.0°</output>
-            <div class="canvas-help">Drag robot: scrub preview · Alt: ⅕-speed points · Shift: no snap · Double-click: add route point</div>
-            <div class="field-credit">Orthographic field by <a href="https://field-rendering.jerryio.com/" target="_blank" rel="noopener">Jerry Lum</a> · CC BY 4.0 · exact 144″ floor crop</div>
-          </div>
-          <div class="point-legend" aria-label="Field marker guide">
-            <span><i class="legend-point"></i><b>P · Route point</b> Robot passes through</span>
-            <span><i class="legend-control"></i><b>C · Control point</b> Bends the curve</span>
-            <span><i class="legend-start"></i><b>P1</b> Robot start on the first route</span>
+            <div class="readouts" aria-live="off">
+              <output id="coordinate-readout">X — · Y —</output>
+              <output id="heading-readout" aria-label="Preview robot heading">θ 0.0°</output>
+            </div>
           </div>
           <div class="timeline">
-            <div><span class="section-index">03 / Preview · estimated</span><strong id="path-summary">3 anchors · 0.0 in</strong></div>
             <div class="playback-controls">
-              <button id="play-path" class="play-button" data-action="play-path" aria-label="Play full path">▶</button>
-              <label class="scrubber-label" for="path-scrubber"><span class="visually-hidden">Path playback position</span><input id="path-scrubber" type="range" min="0" max="1000" value="0" title="Drag the slider or drag the robot on the field" /></label>
+              <button id="play-path" class="play-button" data-action="play-path" aria-label="Play route">▶</button>
+              <label class="scrubber-label"><span class="sr-only">Playback position</span><input id="path-scrubber" type="range" min="0" max="1000" value="0" /></label>
               <output id="playback-time">0.0 / 0.0 s</output>
             </div>
-            <div class="direction-summary"><span>Drive direction</span><strong id="direction-summary">All forward</strong></div>
+            <div class="graph-wrap">
+              <span class="graph-peak" id="graph-peak"></span>
+              <svg id="speed-graph" preserveAspectRatio="none" aria-label="Planned speed over time. Click to scrub." role="img"></svg>
+            </div>
+            <div class="timeline-foot">
+              <strong id="path-summary">—</strong>
+              <span class="field-credit">Field render by <a href="https://field-rendering.jerryio.com/" target="_blank" rel="noopener">Jerry Lum</a> · CC BY 4.0</span>
+            </div>
           </div>
-        </section>
+        </main>
 
-        <aside class="rail inspector-rail">
-          <div class="rail-heading"><div><span class="section-index">02 / Controls</span><h2>Inspector</h2></div><span id="selection-index">P01</span></div>
+        <aside id="inspector" class="sheet inspector" aria-label="Inspector">
+          <div class="sheet-head"><h2>Inspector</h2><button class="icon-button sheet-close" data-close-sheet aria-label="Close inspector">×</button></div>
+          <section class="panel checks-panel" id="checks"></section>
+          <div id="selection-panels"></div>
+          <button class="danger-link" data-action="delete-path" id="delete-path">Delete route</button>
+        </aside>
+        <div class="sheet-backdrop" data-close-sheet hidden></div>
+      </div>
 
-          <section class="inspector-section curve-section">
-            <div class="section-label"><span>Segment geometry</span></div>
-            <label class="stacked-label" for="segment-select">Editing segment</label><select id="segment-select"></select>
-            <label class="stacked-label" for="geometry-mode">Curve type</label><select id="geometry-mode"><option value="bezier">Bézier · editable control points</option><option value="hermite">Legacy · heading and tangent</option></select>
-            <label class="stacked-label" for="segment-direction">Drive direction</label><select id="segment-direction"><option value="false">Forward</option><option value="true">Reverse</option></select>
-            <p class="point-explainer"><i class="legend-control"></i> Blue diamonds bend the curve. They are not destinations the robot drives through.</p>
-            <div class="control-toolbar"><label for="control-count">Control points</label><input id="control-count" type="number" min="0" step="1" value="0" /><button data-action="add-control">+ Add</button></div>
-            <p id="control-help" class="control-help"></p>
-            <div class="control-column-labels" aria-hidden="true"><span>Point</span><span>X / in</span><span>Y / in</span><span></span></div>
-            <div id="control-panel"></div>
+      <dialog id="settings" class="drawer" aria-labelledby="settings-title">
+        <form method="dialog" class="drawer-head"><h2 id="settings-title">Settings</h2><button class="icon-button" aria-label="Close settings">×</button></form>
+        <div class="drawer-body">
+          <section class="panel">
+            <div class="panel-label"><span>File</span><small>autosaves to this browser</small></div>
+            <div class="button-row"><button data-action="open">Open .vpath</button><button data-action="save">Save .vpath</button></div>
           </section>
-
-          <details class="settings-group"><summary>Field & alliance</summary>
-          <section class="inspector-section alliance-section">
-            <div class="section-label"><span>Alliance view</span><small>highlights alliance quadrants</small></div>
-            <div class="segmented"><button data-alliance="red" class="is-active"><i class="red-dot"></i>Red</button><button data-alliance="blue"><i class="blue-dot"></i>Blue</button><button data-alliance="skills">Skills</button></div>
+          <section class="panel">
+            <div class="panel-label"><span>Odometry log</span><small>compare a run with the plan</small></div>
+            <p class="hint">Load a CSV the robot recorded with <b>x</b> and <b>y</b> columns in inches from the bottom-left corner. It draws over the field until you clear it; it isn't saved.</p>
+            <div class="button-row"><button data-action="load-log">Load CSV…</button><button data-action="clear-log" id="clear-log" disabled>Clear</button></div>
+            <p class="hint" id="log-status"></p>
+            <input id="log-input" type="file" accept=".csv,.txt,text/csv,text/plain" hidden />
           </section>
-
-          </details>
-          <section class="inspector-section" id="waypoint-inspector">
-            <div class="section-label"><span>Selected route point</span><small id="waypoint-label">Route point P1</small></div>
+          <section class="panel">
+            <div class="panel-label"><span>Robot</span><small>in · in/s · in/s²</small></div>
             <div class="field-pair">
-              <label><span>X / in</span><input id="point-x" type="number" min="0" max="144" step="0.1" /></label>
-              <label><span>Y / in</span><input id="point-y" type="number" min="0" max="144" step="0.1" /></label>
-            </div>
-            <div class="field-pair" id="heading-fields">
-              <label><span>Heading / °</span><input id="point-heading" type="number" step="1" /></label>
-              <label><span>Tangent / in</span><input id="point-tangent" type="number" min="1" step="1" /></label>
+              <label><span>Length</span><input data-robot="length" type="number" min="1" max="72" step="0.1" /></label>
+              <label><span>Width</span><input data-robot="width" type="number" min="1" max="72" step="0.1" /></label>
+              <label><span>Track width</span><input data-robot="trackWidth" type="number" min="0.1" max="72" step="0.1" /></label>
+              <label><span>Max velocity</span><input data-robot="maxVelocity" type="number" min="0.1" step="1" /></label>
+              <label><span>Acceleration</span><input data-robot="maxAcceleration" type="number" min="0.1" step="1" /></label>
+              <label><span>Deceleration</span><input data-robot="maxDeceleration" type="number" min="0.1" step="1" /></label>
+              <label><span>Wheel velocity</span><input data-robot="maxWheelVelocity" type="number" min="0.1" step="1" /></label>
+              <label><span>Centripetal accel.</span><input data-robot="maxCentripetalAcceleration" type="number" min="0.1" step="1" /></label>
+              <label><span>Start velocity</span><input data-robot="startVelocity" type="number" min="0" step="1" /></label>
+              <label><span>End velocity</span><input data-robot="endVelocity" type="number" min="0" step="1" /></label>
+              <label title="Spacing of trajectory samples on the robot. Smaller is smoother but uses more memory."><span>Sample spacing</span><input data-robot="sampleDistance" type="number" min="0.05" max="2" step="0.05" /></label>
             </div>
           </section>
-
-          <section class="inspector-section waypoint-list-section">
-            <div class="section-label"><span>Route points · robot passes through</span><small id="waypoint-count">0 points</small></div>
-            <div class="waypoint-list-heading" aria-hidden="true"><span>Point</span><span>X / in</span><span>Y / in</span><span>θ / °</span></div>
-            <div id="waypoint-list" class="waypoint-list"></div>
-          </section>
-
-
-
-          <details class="settings-group"><summary>Robot setup</summary>
-          <section class="inspector-section robot-section">
-            <div class="section-label"><span>Robot setup</span><small>in · in/s · in/s²</small></div>
-            <div class="field-pair">
-              <label><span>Length / in</span><input id="robot-length" data-robot="length" type="number" min="1" max="72" step="0.1" /></label>
-              <label><span>Width / in</span><input id="robot-width" data-robot="width" type="number" min="1" max="72" step="0.1" /></label>
-            </div>
-            <div class="field-pair">
-              <label><span>Track width / in</span><input id="robot-track-width" data-robot="trackWidth" type="number" min="0.1" max="72" step="0.1" /></label>
-              <label><span>Max velocity</span><input id="robot-max-velocity" data-robot="maxVelocity" type="number" min="0.1" step="1" /></label>
-            </div>
-            <div class="field-pair">
-              <label><span>Acceleration</span><input id="robot-max-acceleration" data-robot="maxAcceleration" type="number" min="0.1" step="1" /></label>
-              <label><span>Deceleration</span><input id="robot-max-deceleration" data-robot="maxDeceleration" type="number" min="0.1" step="1" /></label>
-            </div>
-            <details class="advanced-robot">
-              <summary>Advanced constraints</summary>
-              <div class="field-pair">
-                <label><span>Wheel velocity</span><input id="robot-wheel-velocity" data-robot="maxWheelVelocity" type="number" min="0.1" step="1" /></label>
-                <label><span>Centripetal accel.</span><input id="robot-centripetal" data-robot="maxCentripetalAcceleration" type="number" min="0.1" step="1" /></label>
-              </div>
-              <div class="field-pair">
-                <label><span>Start velocity</span><input id="robot-start-velocity" data-robot="startVelocity" type="number" min="0" step="1" /></label>
-                <label><span>End velocity</span><input id="robot-end-velocity" data-robot="endVelocity" type="number" min="0" step="1" /></label>
-              </div>
-            </details>
-          </section>
-          </details>
-
-          <details class="settings-group"><summary>Mirror & reverse</summary>
-          <section class="inspector-section mirror-section">
-            <div class="section-label"><span>Mirror path</span><small>all actions are undoable</small></div>
+          <section class="panel">
+            <div class="panel-label"><span>Mirror &amp; reverse</span><small>undoable</small></div>
             <div class="mirror-grid">
-              <button class="mirror-primary" data-action="mirror-quadrant"><b>◩</b><span>Opposite quadrant</span><small>Same alliance · across single white line</small></button>
+              <button class="mirror-primary" data-action="mirror-alliance-copy"><b>⟲</b><span>Red ↔ Blue copy</span><small>New route rotated 180° for the other alliance</small></button>
+              <button data-action="mirror-quadrant"><b>◩</b><span>Opposite quadrant</span><small>Same alliance · across white line</small></button>
               <button data-action="mirror-left-right"><b>↔</b><span>Left / right</span><small>Across X centre</small></button>
               <button data-action="mirror-bottom-top"><b>↕</b><span>Bottom / top</span><small>Across Y centre</small></button>
+              <button data-action="reverse-order"><b>⇄</b><span>Reverse order</span><small>Drive the route backwards</small></button>
             </div>
-            <button class="reverse-order" data-action="reverse-order"><span>Reverse path order</span><b>⇄</b></button>
           </section>
-          </details>
+          <section class="panel">
+            <div class="panel-label"><span>Field</span></div>
+            <p class="hint">Coordinates start at the bottom-left corner (0, 0) of the 144 × 144 in floor. GPS export converts to VEX's centre origin and compass heading.</p>
+            <p class="hint">Field render by <a href="https://field-rendering.jerryio.com/" target="_blank" rel="noopener">Jerry Lum</a>, CC BY 4.0, cropped to the exact 144″ floor.</p>
+          </section>
+          <section class="panel">
+            <div class="panel-label"><span>Keyboard &amp; touch</span></div>
+            <dl class="shortcuts">
+              <div><dt>Double-click / long-press</dt><dd>Add a point (on the path: insert one)</dd></div>
+              <div><dt>A</dt><dd>Add a point after the last one</dd></div>
+              <div><dt>Arrows</dt><dd>Nudge 1″ · Shift 6″ · Alt ¼″</dd></div>
+              <div><dt>Delete</dt><dd>Delete the selected point or control</dd></div>
+              <div><dt>⌘Z / ⇧⌘Z</dt><dd>Undo / redo</dd></div>
+              <div><dt>Space</dt><dd>Play or pause the preview</dd></div>
+              <div><dt>Alt-drag · Shift-drag</dt><dd>Fine movement · ignore snap</dd></div>
+            </dl>
+          </section>
+        </div>
+      </dialog>
 
-          <details class="settings-group"><summary>Export settings</summary>
-          <section class="inspector-section export-settings">
-            <div class="section-label"><span>Code export</span><small>VantagePath C++17</small></div>
+      <dialog id="export" class="drawer wide" aria-labelledby="export-title">
+        <form method="dialog" class="drawer-head"><h2 id="export-title">Export C++</h2><button class="icon-button" aria-label="Close export">×</button></form>
+        <div class="drawer-body">
+          <div class="field-pair">
+            <label><span>Target</span><select id="export-target"><option value="library">VantagePath library · trajectories</option><option value="chassis">4613R VantageChassis · run function</option></select></label>
             <label><span>Coordinate frame</span><select id="export-frame"><option value="corner">Corner origin · inches</option><option value="gps">Official VEX GPS · metres</option></select></label>
-            <label><span>Variable name</span><input id="variable-name" value="competitionAuto" pattern="[A-Za-z_][A-Za-z0-9_]*" /></label>
-          </section>
-          </details>
+            <label><span>Variable name</span><input id="variable-name" value="competitionAuto" pattern="[A-Za-z_][A-Za-z0-9_]*" spellcheck="false" /></label>
+          </div>
+          <p class="hint" id="export-note"></p>
+          <pre class="code-preview" id="export-preview" tabindex="0"></pre>
+          <div class="button-row"><button class="primary" data-action="copy-export">Copy code</button><button data-action="download-export">Download .hpp</button></div>
+        </div>
+      </dialog>
 
-          <button class="danger-action" data-action="delete-path">Delete active path</button>
-        </aside>
-      </section>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    </main>
-    <script type="module" src="app.js?v=route-headings-1"></script>
+    </div>
+    <script type="module" src="app.js?v=studio-3"></script>
   </body>
 </html>

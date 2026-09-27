@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://isaaach.github.io/VantagePath/studio/vpath.schema.json",
+  "title": "VantagePath Studio document",
+  "description": "A .vpath file. Corner frame: inches from the bottom-left of the 144 in field, headings in radians CCW from +X. Studio also opens format 1 files and upgrades them.",
+  "type": "object",
+  "required": ["type", "version", "paths"],
+  "properties": {
+    "type": { "const": "VantagePathDocument" },
+    "version": { "const": 2 },
+    "title": { "type": "string", "maxLength": 120 },
+    "game": { "type": "string" },
+    "coordinateFrame": { "const": "corner-bottom-left" },
+    "units": { "const": "inches" },
+    "field": { "type": "object", "properties": { "width": { "const": 144 }, "height": { "const": 144 } } },
+    "alliance": { "enum": ["red", "blue", "skills"] },
+    "snap": { "type": "boolean" },
+    "snapStep": { "enum": [0.25, 1, 6] },
+    "showZones": { "type": "boolean" },
+    "robotStart": { "$ref": "#/$defs/pose", "description": "Kept in sync with P1 of the first route, which is authoritative." },
+    "robot": {
+      "type": "object",
+      "properties": {
+        "length": { "type": "number", "minimum": 1, "maximum": 72 },
+        "width": { "type": "number", "minimum": 1, "maximum": 72 },
+        "trackWidth": { "type": "number", "exclusiveMinimum": 0, "maximum": 72 },
+        "maxVelocity": { "type": "number", "exclusiveMinimum": 0 },
+        "maxAcceleration": { "type": "number", "exclusiveMinimum": 0 },
+        "maxDeceleration": { "type": "number", "exclusiveMinimum": 0 },
+        "maxWheelVelocity": { "type": "number", "exclusiveMinimum": 0 },
+        "maxCentripetalAcceleration": { "type": "number", "exclusiveMinimum": 0 },
+        "startVelocity": { "type": "number", "minimum": 0 },
+        "endVelocity": { "type": "number", "minimum": 0 },
+        "sampleDistance": { "type": "number", "minimum": 0.05, "maximum": 2 }
+      }
+    },
+    "paths": { "type": "array", "items": { "$ref": "#/$defs/path" } }
+  },
+  "$defs": {
+    "pose": {
+      "type": "object",
+      "required": ["x", "y", "heading"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 144 },
+        "y": { "type": "number", "minimum": 0, "maximum": 144 },
+        "heading": { "type": "number" }
+      }
+    },
+    "path": {
+      "type": "object",
+      "required": ["id", "waypoints"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "color": { "type": "string" },
+        "waypoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "allOf": [{ "$ref": "#/$defs/pose" }],
+            "required": ["id", "tangent"],
+            "properties": { "id": { "type": "string" }, "tangent": { "type": "number", "minimum": 1 } }
+          }
+        },
+        "segmentReversed": { "type": "array", "items": { "type": "boolean" }, "description": "One per segment: true drives it in reverse." },
+        "controlPoints": {
+          "type": "array",
+          "description": "One per segment: null is legacy heading/tangent geometry, [] a straight Bézier, otherwise its control points.",
+          "items": {
+            "oneOf": [
+              { "type": "null" },
+              { "type": "array", "items": { "type": "object", "required": ["x", "y"], "properties": { "id": { "type": "string" }, "x": { "type": "number", "minimum": 0, "maximum": 144 }, "y": { "type": "number", "minimum": 0, "maximum": 144 } } } }
+            ]
+          }
+        },
+        "segmentSpeed": { "type": "array", "items": { "oneOf": [{ "type": "null" }, { "type": "number", "exclusiveMinimum": 0 }] }, "description": "One per segment: speed ceiling in in/s, or null for the robot limit." },
+        "markers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["segment", "t"],
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string", "maxLength": 40 },
+              "segment": { "type": "integer", "minimum": 0 },
+              "t": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        "waitAfterMs": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}
