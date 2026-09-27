@@ -64,3 +64,16 @@ includes a separate `…RobotStart` `Pose2d` for initializing localization; GPS
 export includes both the GPS pose and its conversion to the trajectory frame.
 Drag the yellow playback robot directly along the selected route to scrub the
 preview. The timeline slider remains available for fine adjustment.
+
+## Code layout
+
+| File | Role |
+|---|---|
+| `model.js` | Document format, geometry helpers, validation and C++ export |
+| `planner.js` | Port of `trajectory.cpp`: sections, stops, speed and timing |
+| `analysis.js` | Route checks: corners, tight curves, wall hits |
+| `route-edits.js` | Pure route edits (append, insert, delete, mirror, …) |
+| `store.js` | Document, selection, undo history and autosave |
+| `views/*.js` | HTML/SVG markup for the field, outline, inspector and timeline |
+| `app.js` | Wires DOM events to the store, edits and views |
+
