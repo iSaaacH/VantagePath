@@ -128,11 +128,12 @@ input:disabled { background: var(--paper-2); color: var(--muted); }
 /* Inspector */
 .checks-panel { background: var(--paper-3); }
 .checks-list { display: grid; gap: 8px; list-style: none; margin: 10px 0 0; padding: 0; }
-.check { border: 1px solid var(--line); border-left: 4px solid var(--muted); border-radius: var(--radius); display: grid; gap: 8px; padding: 10px 12px; }
-.check.is-error { background: rgba(210,59,48,.06); border-left-color: var(--red); }
-.check.is-warning { background: rgba(201,143,0,.08); border-left-color: var(--amber); }
-.check.is-info { border-left-color: var(--blue); }
-.check.is-ok { border-left-color: var(--green); color: var(--muted); font-size: 13px; }
+.check { --severity: var(--muted); border: 1px solid var(--line); border-radius: var(--radius); display: grid; gap: 8px; padding: 10px 12px; }
+.check.is-error { --severity: var(--red); background: rgba(210,59,48,.06); }
+.check.is-warning { --severity: var(--amber); background: rgba(201,143,0,.08); }
+.check.is-info { --severity: var(--blue); }
+.check.is-ok { --severity: var(--green); color: var(--muted); font-size: 13px; }
+.check-body b::before, .check.is-ok span::before { background: var(--severity); border-radius: 50%; content: ""; display: inline-block; height: 8px; margin-right: 7px; vertical-align: 1px; width: 8px; }
 .check-body { background: none; border: 0; display: grid; gap: 3px; padding: 0; text-align: left; }
 .check-body b { font-size: 13px; }
 .check-body span { color: var(--muted); font-size: 12px; line-height: 1.45; }
