@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { cppExport } from "./export.js";
 import test from "node:test";
 import { analyzeRoute, wallOverlap } from "./analysis.js";
-import { anchorHeading, cppExport, DEFAULT_ROBOT, fromDisplayHeading, historySnapshot, isHeadingDerived, makeDocument, restoreSnapshot, smoothJoin, splitSegment, toDisplayHeading } from "./model.js";
+import { anchorHeading, DEFAULT_ROBOT, fromDisplayHeading, historySnapshot, isHeadingDerived, makeDocument, restoreSnapshot, smoothJoin, splitSegment, toDisplayHeading } from "./model.js";
 import { planRoute, poseAtTime, routeSections, timeAtDistance, turnDuration } from "./planner.js";
 
 function corneredRoute() {
@@ -152,7 +153,7 @@ test("undo snapshots ignore view preferences", () => {
 test("the export sets sample spacing, splits corners and records its format", () => {
   const code = cppExport(corneredRoute(), "route", "corner");
   assert.match(code, /config\.sampleDistance = 0\.3500;/);
-  assert.match(code, /Export format 2/);
+  assert.match(code, /Export format 3/);
   assert.match(code, /routeSection2Trajectory/);
   assert.match(code, /turn in place \d+\.\d° to heading/);
   assert.match(cppExport(corneredRoute(), "route", "gps"), /config\.sampleDistance = 0\.008890;/);

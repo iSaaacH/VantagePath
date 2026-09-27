@@ -5,7 +5,7 @@ const WIDTH = 1000;
 const HEIGHT = 100;
 const TOP_PAD = 8;
 
-export function speedGraphMarkup(plan) {
+export function speedGraphMarkup(plan, markerTimes = []) {
   if (!plan || plan.error || !(plan.duration > 0)) return { svg: "", peak: 0 };
   const drives = plan.steps.filter((step) => step.type === "drive");
   const peak = Math.max(1, ...drives.flatMap((step) => step.states.map((state) => Math.abs(state.velocity))));
@@ -21,7 +21,8 @@ export function speedGraphMarkup(plan) {
   }).join("");
   const stops = drives.flatMap((step) => step.states.filter((state, i) => i > 0 && i < step.states.length - 1 && state.velocity === 0)
     .map((state) => `<line class="graph-stop" x1="${x(step.startTime + state.time)}" x2="${x(step.startTime + state.time)}" y1="${HEIGHT - 14}" y2="${HEIGHT}"/>`)).join("");
-  const svg = `${turns}${areas}${stops}<line id="graph-playhead" class="graph-playhead" x1="0" x2="0" y1="0" y2="${HEIGHT}"/>`;
+  const markers = markerTimes.map(({ time, name }) => `<line class="graph-marker" x1="${x(time)}" x2="${x(time)}" y1="0" y2="${HEIGHT}"><title>${name.replace(/[<&"]/g, "")}</title></line>`).join("");
+  const svg = `${turns}${areas}${stops}${markers}<line id="graph-playhead" class="graph-playhead" x1="0" x2="0" y1="0" y2="${HEIGHT}"/>`;
   return { svg, peak };
 }
 

@@ -247,6 +247,36 @@ input:disabled { background: var(--paper-2); color: var(--muted); }
 .graph-stop { stroke: var(--red); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .graph-playhead { stroke: var(--ink); stroke-width: 2; vector-effect: non-scaling-stroke; }
 
+/* Phase 3: budget, waits, markers, speed limits, footprint */
+#route-budget { border-bottom: 1px solid var(--line); padding: 12px 16px; }
+.budget-text { align-items: baseline; display: flex; font-size: 12px; justify-content: space-between; }
+.budget-text span { color: var(--muted); }
+.budget-text b { font: 600 13px var(--mono); }
+.budget-bar { background: var(--paper-2); border-radius: 999px; height: 8px; margin-top: 6px; overflow: hidden; }
+.budget-bar i { background: var(--green); display: block; height: 100%; }
+.budget.is-over .budget-bar i { background: var(--red); }
+.budget.is-over .budget-text b { color: var(--red); }
+.inline-field { align-items: center; display: flex; font-size: 12px; gap: 8px; }
+.inline-field span { color: var(--muted); white-space: nowrap; }
+.inline-field input { max-width: 96px; }
+.stacked em { color: var(--muted); font-size: 11px; font-style: normal; }
+.marker-head, .marker-row { display: grid; gap: 6px; grid-template-columns: 1fr 76px 40px; }
+.marker-head { color: var(--muted); font-size: 11px; margin-top: 8px; }
+.marker-list { display: grid; gap: 6px; margin-top: 4px; }
+.marker-row { align-items: center; border-radius: var(--radius); }
+.marker-row.is-selected { background: #ffe9f6; }
+.marker-row > button { background: none; border: 0; font-size: 16px; min-height: var(--target); }
+.event-flag { fill: #ff4fb3; stroke: #3a0626; stroke-width: .35; }
+.event-dot { fill: #fff; stroke: #3a0626; stroke-width: .35; }
+.event-marker { cursor: grab; }
+.event-marker.selected .event-flag { fill: #ffd1ec; }
+.event-label { fill: #5a0a3b; font-size: 2.6px; }
+.footprint { fill: none; pointer-events: none; stroke: rgba(217,255,72,.55); stroke-width: .35; }
+.graph-marker { stroke: #ff4fb3; stroke-dasharray: 3 3; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+
+.log-overlay polyline { fill: none; pointer-events: none; stroke: #ff8a00; stroke-linejoin: round; stroke-width: .7; }
+.log-overlay circle, .log-overlay rect { fill: #ff8a00; stroke: #111; stroke-width: .3; }
+
 /* ------------------------------------------------------------ responsive */
 /* Laptop: routes slide over; inspector stays. */
 @media (max-width: 1279px) {

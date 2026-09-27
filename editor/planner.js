@@ -179,11 +179,50 @@ function sampleSection(path, section, sampleDistance) {
   return { samples, stopIndices };
 }
 
+/**
+ * Per-segment speed ceilings for one section as the library's pathSpeedScale:
+ * a step function of arc-length percent. Boundaries sit midway between the
+ * join sample and the next sample, so no sample lies on one and JS and C++
+ * classify every sample the same way. Returns null when nothing is limited.
+ */
+export function sectionSpeedScale(path, section, samples, maxVelocity) {
+  const speeds = path.segmentSpeed ?? [];
+  let limited = false;
+  const steps = [];
+  for (let segment = section.firstSegment; segment <= section.lastSegment; segment += 1) {
+    const speed = speeds[segment];
+    const scale = Number.isFinite(speed) && speed > 0 ? Math.min(1, speed / maxVelocity) : 1;
+    if (scale < 1) limited = true;
+    steps.push({ segment, scale });
+  }
+  if (!limited) return null;
+  const length = samples.at(-1).distance;
+  const percent = (i) => (length > 1e-9 ? samples[i].distance / length * 100 : 100);
+  const boundaries = [];
+  for (let i = 1; i < samples.length; i += 1) {
+    if (samples[i].segmentIndex !== samples[i - 1].segmentIndex) {
+      // samples[i - 1] is the join (last sample of the earlier segment).
+      boundaries.push(Number(((percent(i - 1) + percent(i)) / 2).toFixed(9)));
+    }
+  }
+  return { boundaries, scales: steps.map((step) => Number(step.scale.toFixed(9))) };
+}
+
+export function evaluateSpeedScale(spec, percent) {
+  const index = spec.boundaries.findIndex((boundary) => percent < boundary);
+  return spec.scales[index < 0 ? spec.scales.length - 1 : index];
+}
+
 function planVelocities(samples, stopIndices, config) {
+  const scaleSpec = config.speedScale;
+  const length = samples.at(-1).distance;
+  const scales = scaleSpec ? samples.map((sample) => evaluateSpeedScale(scaleSpec, length > 1e-9 ? sample.distance / length * 100 : 100)) : null;
   const velocity = samples.map((sample, i) => {
     const curvature = Math.abs(sample.curvature);
     const curvatureBound = Math.max(curvature, Math.abs(samples[Math.max(0, i - 1)].curvature), Math.abs(samples[Math.min(i + 1, samples.length - 1)].curvature));
-    let limit = Math.min(config.maxVelocity, config.maxWheelVelocity / (1 + curvatureBound * config.trackWidth * 0.5));
+    // Lower the preceding sample too, bounding interpolation at a step down.
+    const ceiling = scales ? config.maxVelocity * Math.min(scales[i], scales[Math.min(i + 1, samples.length - 1)]) : config.maxVelocity;
+    let limit = Math.min(ceiling, config.maxWheelVelocity / (1 + curvatureBound * config.trackWidth * 0.5));
     if (curvature > 1e-9) limit = Math.min(limit, Math.sqrt(config.maxCentripetalAcceleration / curvature));
     return limit;
   });
@@ -204,7 +243,8 @@ function planVelocities(samples, stopIndices, config) {
 /** Plans one section. Returns time-stamped states in document units. */
 export function planSection(path, section, config) {
   const { samples, stopIndices } = sampleSection(path, section, config.sampleDistance);
-  const velocity = planVelocities(samples, stopIndices, config);
+  const speedScale = sectionSpeedScale(path, section, samples, config.maxVelocity);
+  const velocity = planVelocities(samples, stopIndices, { ...config, speedScale });
   let time = 0;
   const states = samples.map((sample, i) => {
     if (i > 0) {
@@ -217,7 +257,7 @@ export function planSection(path, section, config) {
     return { ...sample, heading, velocity: velocity[i], time };
   });
   const stops = stopIndices.map((index) => ({ x: samples[index].x, y: samples[index].y, waypointIndex: samples[index].segmentIndex, reason: "bezier-join" }));
-  return { states, stops, duration: time, length: samples.at(-1).distance };
+  return { states, stops, duration: time, length: samples.at(-1).distance, speedScale };
 }
 
 /** Time for a point turn of `angle` radians using the robot's wheel limits. */

@@ -69,7 +69,9 @@ preview. The timeline slider remains available for fine adjustment.
 
 | File | Role |
 |---|---|
-| `model.js` | Document format, geometry helpers, validation and C++ export |
+| `model.js` | Document format, geometry helpers and validation |
+| `export.js` | C++ export: library trajectories or a VantageChassis run function |
+| `log-overlay.js` | Odometry CSV overlay and deviation from the plan |
 | `planner.js` | Port of `trajectory.cpp`: sections, stops, speed and timing |
 | `analysis.js` | Route checks: corners, tight curves, wall hits |
 | `route-edits.js` | Pure route edits (append, insert, delete, mirror, …) |

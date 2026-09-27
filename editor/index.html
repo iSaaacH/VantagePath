@@ -41,6 +41,7 @@
       <div class="workspace">
         <aside id="outline" class="sheet outline" aria-label="Routes">
           <div class="sheet-head"><h2>Routes</h2><button class="icon-button accent" data-action="new-path" aria-label="New route" title="New route">＋</button><button class="icon-button sheet-close" data-close-sheet aria-label="Close routes">×</button></div>
+          <section id="route-budget"></section>
           <section id="robot-start"></section>
           <ol id="route-tree" class="route-tree"></ol>
         </aside>
@@ -56,6 +57,7 @@
               <label class="check-chip"><input id="snap-toggle" type="checkbox" checked /><span>Snap</span></label>
               <select id="snap-step" aria-label="Snap distance"><option value="0.25">¼″</option><option value="1">1″</option><option value="6">6″</option></select>
               <label class="check-chip"><input id="zone-toggle" type="checkbox" checked /><span>Zones</span></label>
+              <label class="check-chip" title="Draw the robot's outline along the route"><input id="footprint-toggle" type="checkbox" /><span>Footprint</span></label>
               <select id="heading-mode" aria-label="Heading convention" title="How headings are shown and typed. Export always writes library radians.">
                 <option value="math">θ 0° right · CCW</option>
                 <option value="compass">θ 0° up · CW</option>
@@ -101,6 +103,13 @@
           <section class="panel">
             <div class="panel-label"><span>File</span><small>autosaves to this browser</small></div>
             <div class="button-row"><button data-action="open">Open .vpath</button><button data-action="save">Save .vpath</button></div>
+          </section>
+          <section class="panel">
+            <div class="panel-label"><span>Odometry log</span><small>compare a run with the plan</small></div>
+            <p class="hint">Load a CSV the robot recorded with <b>x</b> and <b>y</b> columns in inches from the bottom-left corner. It draws over the field until you clear it; it isn't saved.</p>
+            <div class="button-row"><button data-action="load-log">Load CSV…</button><button data-action="clear-log" id="clear-log" disabled>Clear</button></div>
+            <p class="hint" id="log-status"></p>
+            <input id="log-input" type="file" accept=".csv,.txt,text/csv,text/plain" hidden />
           </section>
           <section class="panel">
             <div class="panel-label"><span>Robot</span><small>in · in/s · in/s²</small></div>
@@ -152,6 +161,7 @@
         <form method="dialog" class="drawer-head"><h2 id="export-title">Export C++</h2><button class="icon-button" aria-label="Close export">×</button></form>
         <div class="drawer-body">
           <div class="field-pair">
+            <label><span>Target</span><select id="export-target"><option value="library">VantagePath library · trajectories</option><option value="chassis">4613R VantageChassis · run function</option></select></label>
             <label><span>Coordinate frame</span><select id="export-frame"><option value="corner">Corner origin · inches</option><option value="gps">Official VEX GPS · metres</option></select></label>
             <label><span>Variable name</span><input id="variable-name" value="competitionAuto" pattern="[A-Za-z_][A-Za-z0-9_]*" spellcheck="false" /></label>
           </div>

@@ -1,12 +1,14 @@
 // VantagePath Studio: wires the DOM to the store, the route edits and the views.
 
-import { clamp, cppExport, dragPosition, FIELD_SIZE, fromDisplayHeading, nearestPathDistance, normalizeSegmentDirections, robotStartPose, toDisplayHeading, validateDocument, wrapRadians } from "./model.js";
+import { cppExport, sectionMarkers } from "./export.js";
+import { clamp, dragPosition, FIELD_SIZE, fromDisplayHeading, nearestPathDistance, normalizeSegmentDirections, robotStartPose, segmentPoint, toDisplayHeading, validateDocument, wrapRadians } from "./model.js";
 import { poseAtTime, routeSamples, timeAtDistance } from "./planner.js";
 import * as edits from "./route-edits.js";
-import { activePath, canRedo, canUndo, commit, initStore, persist, replaceDocument, restore, routePlan, select, selectedControl, selectedPoint, setActivePath, setPrefs, setView, state } from "./store.js";
-import { activeRouteMarkup, fieldMarkup, inactiveRoutesMarkup } from "./views/field.js";
+import { activePath, canRedo, canUndo, commit, initStore, persist, replaceDocument, restore, routeDurations, routePlan, select, selectedControl, selectedMarker, selectedPoint, setActivePath, setPrefs, setView, state } from "./store.js";
+import { activeRouteMarkup, fieldMarkup, inactiveRoutesMarkup, logOverlayMarkup } from "./views/field.js";
+import { deviationFromPlan, parseLogCsv } from "./log-overlay.js";
 import { checksMarkup, inspectorMarkup } from "./views/inspector.js";
-import { robotStartMarkup, routeTreeMarkup } from "./views/outline.js";
+import { budgetMarkup, robotStartMarkup, routeTreeMarkup } from "./views/outline.js";
 import { GRAPH_VIEWBOX, playheadX, speedGraphMarkup } from "./views/timeline.js";
 
 const LONG_PRESS_MS = 550;
@@ -16,7 +18,8 @@ const DOUBLE_CLICK_SLOP_IN = 2;
 const DELETE_CONFIRM_MS = 3000;
 const TOAST_MS = 2600;
 const HANDLE_SCALE = 5;
-const MARKER_SELECTOR = "[data-point-id],[data-handle-id],[data-control-id],[data-playback-marker]";
+const MARKER_SELECTOR = "[data-point-id],[data-handle-id],[data-control-id],[data-marker-id],[data-playback-marker]";
+const MARKER_SNAP_SAMPLES = 200;
 
 const $ = (selector) => document.querySelector(selector);
 const svg = $("#field");
@@ -29,6 +32,7 @@ let drag = null;
 let longPress = null;
 let deleteArmedUntil = 0;
 let toastTimer = 0;
+let logOverlay = null;
 const playback = { playing: false, time: 0, startedAt: 0, startedFrom: 0, frame: 0 };
 
 // ---------------------------------------------------------------- rendering
@@ -46,8 +50,8 @@ function headingText(radians) { return `${toDisplayHeading(radians, state.prefs.
 function renderField() {
   const path = activePath();
   const { plan, issues } = routePlan();
-  svg.innerHTML = fieldMarkup(state.doc) + inactiveRoutesMarkup(state.doc, path?.id)
-    + activeRouteMarkup(path, { robot: state.doc.robot, selection: state.selection, plan, issues });
+  svg.innerHTML = fieldMarkup(state.doc) + inactiveRoutesMarkup(state.doc, path?.id) + logOverlayMarkup(logOverlay)
+    + activeRouteMarkup(path, { robot: state.doc.robot, selection: state.selection, plan, issues, showFootprint: state.prefs.showFootprint });
   updatePlaybackUi();
 }
 
@@ -79,11 +83,12 @@ function render() {
   renderField();
   const primary = state.doc.paths[0]?.waypoints[0];
   const startSelected = state.activePathId === state.doc.paths[0]?.id && state.selection.pointId === primary?.id && !state.selection.controlId;
+  $("#route-budget").innerHTML = budgetMarkup(state.doc, routeDurations());
   renderPreservingFocus($("#robot-start"), robotStartMarkup(state.doc, state.prefs, startSelected));
   renderPreservingFocus($("#route-tree"), routeTreeMarkup(state.doc, { activePathId: state.activePathId, selection: state.selection, prefs: state.prefs, plan, issues }));
   $("#checks").innerHTML = checksMarkup(issues);
   renderPreservingFocus($("#selection-panels"), inspectorMarkup(path, { selection: state.selection, prefs: state.prefs, plan }));
-  const { svg: graphSvg, peak } = speedGraphMarkup(plan);
+  const { svg: graphSvg, peak } = speedGraphMarkup(plan, markerTimes(path, plan));
   graph.setAttribute("viewBox", GRAPH_VIEWBOX);
   graph.innerHTML = graphSvg;
   $("#graph-peak").textContent = peak ? `${peak.toFixed(0)} in/s` : "";
@@ -94,6 +99,7 @@ function render() {
   $("#snap-step").value = String(state.doc.snapStep);
   $("#snap-toggle").checked = state.doc.snap;
   $("#zone-toggle").checked = state.doc.showZones;
+  $("#footprint-toggle").checked = state.prefs.showFootprint;
   $("#heading-mode").value = state.prefs.headingMode;
   document.querySelectorAll("[data-robot]").forEach((input) => {
     if (document.activeElement !== input) input.value = Number(state.doc.robot[input.dataset.robot]).toFixed(input.dataset.robot === "sampleDistance" ? 2 : 1);
@@ -110,6 +116,16 @@ function render() {
   $("#delete-path").classList.toggle("is-armed", armed);
   renderSaveState();
   if ($("#export").open) renderExportPreview();
+}
+
+// When each event marker fires along the planned route, for the speed graph.
+function markerTimes(path, plan) {
+  if (!path || plan.error) return [];
+  return plan.steps.filter((step) => step.type === "drive").flatMap((drive) => sectionMarkers(path, drive).map((marker) => {
+    const target = marker.percent / 100 * drive.length;
+    const state = drive.states.find((candidate) => candidate.distance >= target) ?? drive.states.at(-1);
+    return { name: marker.name, time: drive.startTime + state.time };
+  }));
 }
 
 // ----------------------------------------------------------------- playback
@@ -238,6 +254,22 @@ function deleteRoute() {
   commit(`Deleted “${path.name}”`);
 }
 
+function renderLogStatus() {
+  $("#clear-log").disabled = !logOverlay;
+  if (!logOverlay) { $("#log-status").textContent = ""; return; }
+  const deviation = deviationFromPlan(logOverlay.points, routeSamples(routePlan().plan));
+  $("#log-status").textContent = `${logOverlay.name}: ${logOverlay.points.length} points${logOverlay.skipped ? `, ${logOverlay.skipped} rows skipped` : ""}.`
+    + (deviation ? ` Off the active route by up to ${deviation.worst.toFixed(1)} in (average ${deviation.average.toFixed(1)} in).` : "");
+}
+
+function moveActiveRoute(delta) {
+  const path = activePath(); if (!path) return;
+  const moved = edits.moveRoute(state.doc.paths, path.id, delta);
+  if (moved === state.doc.paths) return;
+  state.doc.paths = moved;
+  commit(delta < 0 ? `“${path.name}” now runs earlier` : `“${path.name}” now runs later`);
+}
+
 function smoothAt(index) {
   const path = activePath(); if (!path) return;
   select({ pointId: path.waypoints[index]?.id ?? state.selection.pointId, controlId: null });
@@ -247,7 +279,9 @@ function smoothAt(index) {
 // ------------------------------------------------------------------ export
 
 function exportCode() {
-  return cppExport(state.doc, $("#variable-name").value, $("#export-frame").value);
+  const target = $("#export-target").value;
+  $("#export-frame").disabled = target === "chassis";
+  return cppExport(state.doc, $("#variable-name").value, $("#export-frame").value, target);
 }
 
 function renderExportPreview() {
@@ -255,6 +289,12 @@ function renderExportPreview() {
   $("#export-preview").textContent = code;
   const sections = (code.match(/Trajectory = vantage::generateTrajectory/g) ?? []).length;
   const valid = /^[A-Za-z_][A-Za-z0-9_]*$/.test($("#variable-name").value);
+  const chassis = $("#export-target").value === "chassis";
+  if (chassis) {
+    const follows = (code.match(/chassis\.followPath\(/g) ?? []).length;
+    $("#export-note").textContent = `${follows} followPath call${follows === 1 ? "" : "s"} with suggested timeouts, point turns, marker waits and route waits. Paste into your auton and fill in the marker actions. Corner frame only.`;
+    return;
+  }
   $("#export-note").textContent = `${sections} trajector${sections === 1 ? "y" : "ies"} across ${state.doc.paths.length} route${state.doc.paths.length === 1 ? "" : "s"}. `
     + (valid ? "Corners and direction changes become separate sections that start and end at rest." : "The variable name isn't a valid C++ identifier, so “generatedPath” is used.");
 }
@@ -330,6 +370,16 @@ const ACTIONS = {
   "open-export": () => { renderExportPreview(); $("#export").showModal(); },
   "copy-export": copyExport,
   "download-export": () => { download(`${safeFileName(state.doc.title)}.hpp`, exportCode(), "text/x-c++hdr"); notify("C++ header downloaded"); },
+  "add-marker": () => {
+    const path = activePath(); if (!path || path.waypoints.length < 2) return notify("Add a segment first");
+    const { path: next, marker } = edits.addMarker(path, state.selection.segment, 0.5);
+    select({ markerId: marker.id, controlId: null });
+    applyPath(next, `Added “${marker.name}”. Drag it along the path.`);
+  },
+  "load-log": () => $("#log-input").click(),
+  "clear-log": () => { logOverlay = null; renderLogStatus(); renderField(); },
+  "route-up": () => moveActiveRoute(-1),
+  "route-down": () => moveActiveRoute(1),
 };
 
 function selectPointById(id) {
@@ -361,6 +411,7 @@ const CLICKS = [
     select({ controlId: null });
     applyPath(edits.deleteControl(activePath(), state.selection.segment, id), "Control point removed");
   }],
+  ["[data-remove-marker]", (node) => { select({ markerId: null }); applyPath(edits.deleteMarker(activePath(), node.dataset.removeMarker), "Marker removed"); }],
   ["[data-check-point]", (node) => { const point = activePath()?.waypoints[Number(node.dataset.checkPoint)]; if (point) selectPointById(point.id); }],
 ];
 
@@ -405,6 +456,10 @@ const EDITS = {
   "point-y": (input) => editSelected(input, (point, value) => { point.y = clamp(value); return "Point moved"; }),
   "point-heading": (input) => editSelected(input, (point, value) => { point.heading = fromDisplayHeading(value, state.prefs.headingMode); return "Heading updated"; }),
   "point-tangent": (input) => editSelected(input, (point, value) => { point.tangent = Math.max(1, value); return "Tangent updated"; }),
+  "wait-after": (input, path) => { const value = numberFrom(input); if (value === null) return null; path.waitAfterMs = Math.max(0, Math.round(value)); return "Wait updated"; },
+  "segment-speed": (input, path) => { const value = numberFrom(input); path.segmentSpeed[state.selection.segment] = value !== null && value > 0 ? value : null; return value ? `Segment ${state.selection.segment + 1} limited to ${value} in/s` : "Speed limit cleared"; },
+  "marker-name": (input, path) => { const marker = path.markers.find((m) => m.id === input.dataset.markerId); if (!marker) return null; marker.name = input.value.trim().slice(0, 40) || "Marker"; return "Marker renamed"; },
+  "marker-t": (input, path) => { const marker = path.markers.find((m) => m.id === input.dataset.markerId); const value = numberFrom(input); if (!marker || value === null) return null; marker.t = clamp(value / 100, 0, 1); return "Marker moved"; },
   "control-x": (input, path) => editControl(input, path, "x"),
   "control-y": (input, path) => editControl(input, path, "y"),
 };
@@ -443,12 +498,30 @@ $("#snap-toggle").addEventListener("change", (event) => setView("snap", event.ta
 $("#zone-toggle").addEventListener("change", (event) => setView("showZones", event.target.checked));
 $("#heading-mode").addEventListener("change", (event) => setPrefs({ headingMode: event.target.value === "compass" ? "compass" : "math" }));
 $("#export-frame").addEventListener("change", renderExportPreview);
+$("#export-target").addEventListener("change", renderExportPreview);
+$("#footprint-toggle").addEventListener("change", (event) => setPrefs({ showFootprint: event.target.checked }));
 $("#variable-name").addEventListener("input", renderExportPreview);
 titleNode.addEventListener("blur", () => {
   const title = titleNode.textContent.trim() || "Untitled route";
   if (title !== state.doc.title) { state.doc.title = title; commit("Title updated"); }
 });
 titleNode.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); titleNode.blur(); } });
+
+$("#log-input").addEventListener("change", async (event) => {
+  const input = event.target;
+  try {
+    if (!input.files.length) return;
+    const file = input.files[0];
+    const { points, skipped } = parseLogCsv(await file.text());
+    logOverlay = { name: file.name, points, skipped };
+    renderLogStatus(); renderField();
+    notify(`Overlaid ${points.length} logged points`);
+  } catch (error) {
+    notify(error instanceof Error ? error.message : "Couldn't read that log");
+  } finally {
+    input.value = "";
+  }
+});
 
 fileInput.addEventListener("change", async () => {
   try {
@@ -484,9 +557,33 @@ function startPlaybackDrag(event) {
   updatePlaybackUi();
 }
 
+function startEventMarkerDrag(event, markerId) {
+  select({ markerId, controlId: null });
+  const marker = selectedMarker();
+  if (!marker) return;
+  select({ segment: marker.segment, markerId });
+  // Markers are rebuilt on render, so the drag tracks the id, not the object.
+  drag = { type: "event", markerId, segment: marker.segment, name: marker.name, pointerId: event.pointerId, before: JSON.stringify(state.doc), moved: false };
+  svg.setPointerCapture(event.pointerId);
+  render();
+}
+
+// Curve parameter on `segment` nearest the pointer.
+function nearestT(path, segment, at) {
+  let best = { t: 0, distance: Infinity };
+  for (let i = 0; i <= MARKER_SNAP_SAMPLES; i += 1) {
+    const t = i / MARKER_SNAP_SAMPLES;
+    const point = segmentPoint(path, segment, t);
+    const distance = Math.hypot(point.x - at.x, point.y - at.y);
+    if (distance < best.distance) best = { t, distance };
+  }
+  return best.t;
+}
+
 function startMarkerDrag(event, target) {
   stopPlayback(true);
   const path = activePath();
+  if (target.dataset.markerId) return startEventMarkerDrag(event, target.dataset.markerId);
   const { pointId, handleId, controlId } = target.dataset;
   if (controlId) select({ controlId });
   else {
@@ -525,6 +622,13 @@ svg.addEventListener("pointermove", (event) => {
     playback.time = timeAtDistance(drag.plan, nearestPathDistance(drag.samples, at));
     return updatePlaybackUi();
   }
+  if (drag.type === "event") {
+    const marker = activePath()?.markers.find((candidate) => candidate.id === drag.markerId);
+    if (!marker) return;
+    marker.t = nearestT(activePath(), drag.segment, at);
+    drag.moved = true;
+    return renderField();
+  }
   const step = state.doc.snap && !event.shiftKey ? state.doc.snapStep : 0;
   const moved = dragPosition(drag.origin, drag.pointerStart, at, step, event.altKey);
   const point = drag.point;
@@ -544,6 +648,7 @@ function endDrag(event) {
   if (finished.type === "playback") return updatePlaybackUi();
   if (!finished.moved) return render();
   const primary = state.doc.paths[0]?.waypoints[0];
+  if (finished.type === "event") return commit(`Marker “${finished.name}” moved`);
   commit(finished.type === "control" ? "Control point moved" : finished.point === primary ? "Robot start moved" : "Route point moved");
 }
 svg.addEventListener("pointerup", endDrag);

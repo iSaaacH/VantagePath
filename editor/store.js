@@ -16,7 +16,7 @@ export const state = {
   doc: null,
   prefs: { headingMode: "math" },
   activePathId: null,
-  selection: { pointId: null, controlId: null, segment: 0 },
+  selection: { pointId: null, controlId: null, markerId: null, segment: 0 },
   history: [],
   historyIndex: 0,
   lastCoalesce: { key: null, at: 0 },
@@ -47,8 +47,8 @@ function loadDocument() {
 function loadPrefs() {
   try {
     const stored = JSON.parse(readStorage(PREFS_KEY) ?? "{}");
-    return { headingMode: stored.headingMode === "compass" ? "compass" : "math" };
-  } catch { return { headingMode: "math" }; }
+    return { headingMode: stored.headingMode === "compass" ? "compass" : "math", showFootprint: stored.showFootprint === true };
+  } catch { return { headingMode: "math", showFootprint: false }; }
 }
 
 export function initStore({ render, notify }) {
@@ -63,7 +63,7 @@ export function initStore({ render, notify }) {
 export function replaceDocument(document) {
   state.doc = document;
   state.activePathId = document.paths[0]?.id ?? null;
-  state.selection = { pointId: document.paths[0]?.waypoints[0]?.id ?? null, controlId: null, segment: 0 };
+  state.selection = { pointId: document.paths[0]?.waypoints[0]?.id ?? null, controlId: null, markerId: null, segment: 0 };
   state.history = [historySnapshot(document)];
   state.historyIndex = 0;
   state.lastCoalesce = { key: null, at: 0 };
@@ -98,7 +98,9 @@ export function selectedControl() {
 }
 
 export function select(changes) {
-  state.selection = { ...state.selection, ...changes };
+  // Picking a point or control deselects the marker unless one is named.
+  const clearsMarker = ("pointId" in changes || "controlId" in changes) && !("markerId" in changes);
+  state.selection = { ...state.selection, ...changes, ...(clearsMarker ? { markerId: null } : {}) };
   const path = activePath();
   const lastSegment = Math.max(0, (path?.waypoints.length ?? 1) - 2);
   state.selection.segment = Math.max(0, Math.min(state.selection.segment, lastSegment));
@@ -119,6 +121,28 @@ export function routePlan(path = activePath()) {
   const plan = planRoute(path, state.doc.robot);
   planCache = { key, plan, issues: analyzeRoute(path, plan, state.doc.robot) };
   return planCache;
+}
+
+const durationCache = new Map();
+
+/** Planned duration of every route, for the auton time budget. */
+export function routeDurations() {
+  const durations = new Map();
+  for (const path of state.doc.paths) {
+    const key = JSON.stringify([path, state.doc.robot]);
+    const cached = durationCache.get(path.id);
+    if (cached?.key === key) { durations.set(path.id, cached.duration); continue; }
+    normalizeSegmentDirections(path);
+    const plan = planRoute(path, state.doc.robot);
+    const duration = plan.error ? 0 : plan.duration;
+    durationCache.set(path.id, { key, duration });
+    durations.set(path.id, duration);
+  }
+  return durations;
+}
+
+export function selectedMarker() {
+  return activePath()?.markers?.find((marker) => marker.id === state.selection.markerId) ?? null;
 }
 
 /**

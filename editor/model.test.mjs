@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { dragPosition, bezierPoint, segmentPoint, setControlCount, DEFAULT_ROBOT, FIELD_SIZE, cornerToGps, cppExport, directionRuns, estimateLength, makeDocument, mirrorWaypoint, motionProfile, nearestPathDistance, profileDistance, profileTimeAtDistance, quinticPoint, reverseWaypoints, robotStartPose, validateDocument, wrapRadians } from "./model.js";
+import { cppExport } from "./export.js";
+import { dragPosition, bezierPoint, segmentPoint, setControlCount, DEFAULT_ROBOT, FIELD_SIZE, cornerToGps, directionRuns, estimateLength, makeDocument, mirrorWaypoint, motionProfile, nearestPathDistance, profileDistance, profileTimeAtDistance, quinticPoint, reverseWaypoints, robotStartPose, validateDocument, wrapRadians } from "./model.js";
 
 assert.equal(FIELD_SIZE, 144, "the playable floor is exactly 144 inches");
 assert.deepEqual(

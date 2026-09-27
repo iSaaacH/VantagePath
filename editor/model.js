@@ -1,4 +1,4 @@
-import { routeSections, segmentNoseHeading, segmentTangent, wrapRadians } from "./planner.js";
+import { segmentNoseHeading, segmentTangent, wrapRadians } from "./planner.js";
 
 export { wrapRadians };
 export const FIELD_SIZE = 144;
@@ -80,6 +80,16 @@ export function normalizeSegmentDirections(path) {
     typeof path.segmentReversed?.[index] === "boolean" ? path.segmentReversed[index] : legacyDirection
   );
   path.controlPoints = Array.from({ length: count }, (_, index) => path.controlPoints?.[index] ?? null);
+  // Optional per-segment speed ceiling in in/s; null uses the robot's limit.
+  path.segmentSpeed = Array.from({ length: count }, (_, index) => {
+    const value = path.segmentSpeed?.[index];
+    return Number.isFinite(value) && value > 0 ? value : null;
+  });
+  // Named event markers at curve parameter t on a segment.
+  path.markers = (Array.isArray(path.markers) ? path.markers : [])
+    .filter((marker) => marker && Number.isInteger(marker.segment) && marker.segment >= 0 && marker.segment < count && Number.isFinite(marker.t))
+    .map((marker) => ({ id: marker.id || crypto.randomUUID(), name: String(marker.name ?? "Marker").slice(0, 40) || "Marker", segment: marker.segment, t: Math.min(1, Math.max(0, marker.t)) }));
+  path.waitAfterMs = Number.isFinite(path.waitAfterMs) && path.waitAfterMs > 0 ? Math.round(path.waitAfterMs) : 0;
   delete path.reversed;
   return path.segmentReversed;
 }
@@ -321,7 +331,13 @@ export function splitSegment(path, index, t) {
   }
   next.waypoints.splice(index + 1, 0, point);
   next.segmentReversed.splice(index + 1, 0, next.segmentReversed[index]);
+  next.segmentSpeed.splice(index + 1, 0, next.segmentSpeed[index]);
   next.controlPoints.splice(index, 1, leftControls, rightControls);
+  next.markers = next.markers.map((marker) => {
+    if (marker.segment < index) return marker;
+    if (marker.segment > index) return { ...marker, segment: marker.segment + 1 };
+    return marker.t < t ? { ...marker, t: marker.t / t } : { ...marker, segment: index + 1, t: (marker.t - t) / (1 - t) };
+  });
   return { path: withDerivedHeadings(next), point };
 }
 
@@ -395,7 +411,7 @@ export function makeDocument() {
     showZones: true,
     robot: { ...DEFAULT_ROBOT },
     paths: [{
-      id: crypto.randomUUID(), name: "Primary route", color: "#171715", segmentReversed: [false, false],
+      id: crypto.randomUUID(), name: "Primary route", color: "#171715", segmentReversed: [false, false], segmentSpeed: [null, null], markers: [], waitAfterMs: 0,
       // Tangent-continuous at P2, so the robot drives through it.
       controlPoints: [
         [{ id: crypto.randomUUID(), x: 44, y: 18 }, { id: crypto.randomUUID(), x: 52, y: 36 }],
@@ -451,98 +467,4 @@ export function validateDocument(value) {
   value.robot.startVelocity = Math.max(0, Math.min(value.robot.startVelocity, value.robot.maxVelocity));
   value.robot.endVelocity = Math.max(0, Math.min(value.robot.endVelocity, value.robot.maxVelocity));
   return value;
-}
-
-export const EXPORT_FORMAT_VERSION = 2;
-export const REQUIRED_LIBRARY = "VantagePath with Bézier waypoints (newer than v0.2.0)";
-
-function formatCompass(radians) { return `${toDisplayHeading(radians, "compass").toFixed(1)}° compass`; }
-
-// Geometry heading the C++ generator expects for one anchor inside a section.
-// Hermite segments read it; Bézier segments ignore it, so write their real
-// tangent to keep the literal truthful for anyone reading the code.
-function exportTheta(path, globalIndex, section) {
-  const point = path.waypoints[globalIndex];
-  if (!isHeadingDerived(path, globalIndex)) return section.reversed ? wrapRadians(point.heading + Math.PI) : point.heading;
-  return globalIndex > section.lastSegment
-    ? segmentTangent(path, globalIndex - 1, 1)
-    : segmentTangent(path, globalIndex, 0);
-}
-
-function exportSection(document, path, section, context) {
-  const { gps, name, sectionIndex, sectionCount } = context;
-  const lastIndex = section.lastSegment + 1;
-  const indices = Array.from({ length: lastIndex - section.firstSegment + 1 }, (_, i) => section.firstSegment + i);
-  const toFrame = (point) => (gps ? cornerToGps({ tangent: 0, ...point }) : point);
-  const entries = indices.map((globalIndex) => {
-    const point = path.waypoints[globalIndex];
-    const pose = toFrame({ ...point, heading: exportTheta(path, globalIndex, section) });
-    const controls = globalIndex < lastIndex ? path.controlPoints[globalIndex] : undefined;
-    const extra = Array.isArray(controls) ? `, true, {${controls.map((control) => {
-      const p = toFrame({ x: control.x, y: control.y, heading: Math.PI / 2 });
-      return `{${p.x.toFixed(4)}, ${p.y.toFixed(4)}, 0.000000}`;
-    }).join(", ")}}` : "";
-    const tangent = point.tangent * (gps ? INCH_TO_METRE : 1);
-    return `    {{${pose.x.toFixed(4)}, ${pose.y.toFixed(4)}, ${pose.heading.toFixed(6)}}, ${tangent.toFixed(4)}${extra}}`;
-  }).join(",\n");
-  const scale = gps ? INCH_TO_METRE : 1;
-  const distance = (value) => (value * scale).toFixed(4);
-  const robot = document.robot;
-  const unitNote = gps ? "metres / official GPS centre frame" : "inches / bottom-left corner frame";
-  const label = `${path.name}${sectionCount > 1 ? ` · section ${sectionIndex + 1} of ${sectionCount} (P${section.firstSegment + 1} → P${lastIndex + 1})` : ""}`;
-  const conversion = gps ? `\nconst std::vector<vantage::Waypoint> ${name} = [] {\n  auto waypoints = ${name}Gps;\n  for (auto& waypoint : waypoints) {\n    for (auto& control : waypoint.controlPoints) control = vantage::vexGpsToCorner(control, {3.6576, 3.6576});\n    waypoint.pose = vantage::vexGpsToCorner(\n        waypoint.pose, {3.6576, 3.6576});\n  }\n  return waypoints;\n}();\n` : "\n";
-  const config = [
-    `  config.trackWidth = ${distance(robot.trackWidth)};`,
-    `  config.maxVelocity = ${distance(robot.maxVelocity)};`,
-    `  config.maxAcceleration = ${distance(robot.maxAcceleration)};`,
-    `  config.maxDeceleration = ${distance(robot.maxDeceleration)};`,
-    `  config.maxCentripetalAcceleration = ${distance(robot.maxCentripetalAcceleration)};`,
-    `  config.maxWheelVelocity = ${distance(robot.maxWheelVelocity)};`,
-    `  config.sampleDistance = ${(robot.sampleDistance * scale).toFixed(gps ? 6 : 4)};`,
-    `  config.startVelocity = ${distance(sectionIndex === 0 ? robot.startVelocity : 0)};`,
-    `  config.endVelocity = ${distance(sectionIndex === sectionCount - 1 ? robot.endVelocity : 0)};`,
-    `  config.reversed = ${section.reversed ? "true" : "false"};`,
-  ].join("\n");
-  const turnNote = section.turnAfter && Math.abs(section.turnAfter) > 1e-6
-    ? (() => {
-      const nextHeading = wrapRadians(anchorHeadingAfter(path, section));
-      const gpsHeading = gps ? cornerToGps({ x: 0, y: 0, heading: nextHeading, tangent: 0 }).heading : nextHeading;
-      return `\n// Stop, then turn in place ${(Math.abs(section.turnAfter) * 180 / Math.PI).toFixed(1)}° to heading ${gpsHeading.toFixed(6)} rad (${formatCompass(nextHeading)}) before the next section.`;
-    })()
-    : "";
-  return `// ${label} — ${unitNote}\nconst std::vector<vantage::Waypoint> ${name}${gps ? "Gps" : ""} = {\n${entries}\n};\n${conversion}\nconst vantage::TrajectoryConfig ${name}Config = [] {\n  vantage::TrajectoryConfig config;\n${config}\n  return config;\n}();\nconst auto ${name}Trajectory = vantage::generateTrajectory(${name}, ${name}Config);${turnNote}`;
-}
-
-// Nose heading at the start of the section after this one.
-function anchorHeadingAfter(path, section) {
-  return segmentNoseHeading(path, section.lastSegment + 1, 0);
-}
-
-export function cppExport(document, variableName, frame = "corner") {
-  const safeName = /^[A-Za-z_][A-Za-z0-9_]*$/.test(variableName) ? variableName : "generatedPath";
-  const gps = frame === "gps";
-  const blocks = document.paths.filter((path) => path.waypoints.length > 1).map((original, index, list) => {
-    const path = structuredClone(original);
-    normalizeSegmentDirections(path);
-    const sections = routeSections(path);
-    const routeSuffix = list.length === 1 ? "" : `${index + 1}`;
-    const names = sections.map((_, sectionIndex) => `${safeName}${routeSuffix}${sections.length === 1 ? "" : `Section${sectionIndex + 1}`}`);
-    const code = sections.map((section, sectionIndex) => exportSection(document, path, section, { gps, name: names[sectionIndex], sectionIndex, sectionCount: sections.length }));
-    const collection = sections.length > 1
-      ? `\n\n// Run these sections in order. Each starts and ends at rest; turn in place where noted.\nconst std::vector<vantage::Trajectory> ${safeName}${routeSuffix}Trajectories = { ${names.map((name) => `${name}Trajectory`).join(", ")} };`
-      : "";
-    return code.join("\n\n") + collection;
-  });
-  const start = robotStartPose(document);
-  const startPose = gps ? cornerToGps({ ...start, tangent:0 }) : start;
-  const poseLiteral = `{${startPose.x.toFixed(4)}, ${startPose.y.toFixed(4)}, ${startPose.heading.toFixed(6)}}`;
-  const startExport = gps
-    ? `const vantage::Pose2d ${safeName}RobotStartGps = ${poseLiteral};\nconst auto ${safeName}RobotStart = vantage::vexGpsToCorner(${safeName}RobotStartGps, {3.6576, 3.6576});`
-    : `const vantage::Pose2d ${safeName}RobotStart = ${poseLiteral};`;
-  const header = [
-    "// Generated by VantagePath Studio",
-    `// Export format ${EXPORT_FORMAT_VERSION} · requires ${REQUIRED_LIBRARY}.`,
-    "// Trajectories are generated during static initialisation; a bad route throws before main().",
-  ].join("\n");
-  return `${header}\n#include <vantage/vantage.hpp>\n#include <vector>\n\n// Initial robot pose. Use to initialize localization before running routes.\n// Start facing ${formatCompass(start.heading)} (${(toDisplayHeading(start.heading) ).toFixed(1)}° CCW from +X).\n${startExport}\n\n${blocks.join("\n\n")}`;
 }

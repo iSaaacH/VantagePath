@@ -52,6 +52,18 @@ function pointRow(path, index, { selection, prefs, flagged }) {
   </li>`;
 }
 
+// Total planned time of every route plus waits, against the period length.
+export function budgetMarkup(doc, routeDurations) {
+  const limit = doc.alliance === "skills" ? 60 : 15;
+  const total = doc.paths.reduce((sum, path) => sum + (routeDurations.get(path.id) ?? 0) + (path.waitAfterMs ?? 0) / 1000, 0);
+  const fraction = Math.min(1, total / limit);
+  const over = total > limit;
+  return `<div class="budget${over ? " is-over" : ""}" title="All routes in order, including waits, planned with Studio's robot limits">
+    <div class="budget-text"><span>${doc.alliance === "skills" ? "Skills" : "Autonomous"} budget</span><b>${total.toFixed(1)} / ${limit} s</b></div>
+    <div class="budget-bar"><i style="width:${(fraction * 100).toFixed(1)}%"></i></div>
+  </div>`;
+}
+
 /** The route list. The active route expands into alternating points and segments. */
 export function routeTreeMarkup(doc, { activePathId, selection, prefs, plan, issues }) {
   const flagged = new Map(issues.filter((issue) => issue.severity !== "info" && Number.isInteger(issue.waypointIndex)).map((issue) => [issue.waypointIndex, issue]));
@@ -83,7 +95,8 @@ export function routeTreeMarkup(doc, { activePathId, selection, prefs, plan, iss
       <div class="route-tools">
         <label class="sr-only" for="route-name">Route name</label>
         <input id="route-name" data-edit="route-name" value="${escapeHtml(path.name)}" aria-label="Route name" />
-        <div class="route-tool-buttons"><button data-action="all-forward" title="Drive every segment forward">All →</button><button data-action="all-reverse" title="Drive every segment in reverse">All ←</button><button data-action="duplicate-path">Duplicate</button></div>
+        <div class="route-tool-buttons"><button data-action="all-forward" title="Drive every segment forward">All →</button><button data-action="all-reverse" title="Drive every segment in reverse">All ←</button><button data-action="duplicate-path">Duplicate</button><button data-action="route-up" aria-label="Run this route earlier" title="Run earlier" ${routeIndex === 0 ? "disabled" : ""}>↑</button><button data-action="route-down" aria-label="Run this route later" title="Run later" ${routeIndex === doc.paths.length - 1 ? "disabled" : ""}>↓</button></div>
+        <label class="inline-field"><span>Wait after route</span><input data-edit="wait-after" type="number" min="0" step="50" value="${path.waitAfterMs ?? 0}" /><span>ms</span></label>
       </div>
       <ol class="outline-list">${rows}</ol>
       <button class="add-row" data-action="add-point">＋ Add point after P${path.waypoints.length}</button>

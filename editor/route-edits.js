@@ -68,6 +68,7 @@ export function appendPoint(path, at, snapStep = 0) {
     }
     next.segmentReversed.push(segments > 0 ? next.segmentReversed[segments - 1] : false);
     next.controlPoints.push(controls);
+    next.segmentSpeed.push(null);
   }
   return { path: next, point };
 }
@@ -87,12 +88,12 @@ export function deletePoint(path, pointId) {
   const index = next.waypoints.findIndex((point) => point.id === pointId);
   if (index < 0) return { path, nextPointId: null };
   next.waypoints.splice(index, 1);
-  if (index === 0) { next.segmentReversed.shift(); next.controlPoints.shift(); }
-  else {
-    const removed = Math.min(index, next.segmentReversed.length - 1);
-    next.segmentReversed.splice(removed, 1); next.controlPoints.splice(removed, 1);
-    if (index < next.waypoints.length) next.controlPoints[index - 1] = [];
-  }
+  // The segment that disappears: the first one for P1, else the one after the
+  // point (or before it, for the last point). Markers on it are dropped.
+  const removed = index === 0 ? 0 : Math.min(index, next.segmentReversed.length - 1);
+  next.segmentReversed.splice(removed, 1); next.controlPoints.splice(removed, 1); next.segmentSpeed.splice(removed, 1);
+  if (index > 0 && index < next.waypoints.length) next.controlPoints[index - 1] = [];
+  next.markers = next.markers.filter((marker) => marker.segment !== removed).map((marker) => (marker.segment > removed ? { ...marker, segment: marker.segment - 1 } : marker));
   return { path: next, nextPointId: next.waypoints[Math.min(index, next.waypoints.length - 1)]?.id ?? null };
 }
 
@@ -148,6 +149,9 @@ export function reverseRoute(path) {
   next.waypoints = reverseWaypoints(next.waypoints);
   next.segmentReversed = [...next.segmentReversed].reverse();
   next.controlPoints = [...next.controlPoints].reverse().map((items) => (items ? [...items].reverse() : null));
+  next.segmentSpeed = [...next.segmentSpeed].reverse();
+  const last = next.segmentReversed.length - 1;
+  next.markers = next.markers.map((marker) => ({ ...marker, segment: last - marker.segment, t: 1 - marker.t }));
   return next;
 }
 
@@ -155,6 +159,7 @@ function withFreshIds(path) {
   return {
     ...path,
     id: uid(),
+    markers: path.markers.map((marker) => ({ ...marker, id: uid() })),
     waypoints: path.waypoints.map((point) => ({ ...point, id: uid() })),
     controlPoints: path.controlPoints.map((items) => items?.map((point) => ({ ...point, id: uid() })) ?? null),
   };
@@ -179,7 +184,7 @@ export function allianceCopy(path, viewAlliance) {
 export function newRoute(start, number) {
   const offset = start.x > FIELD_SIZE - 36 ? -36 : 36;
   return {
-    id: uid(), name: `Route ${number}`, color: "#171715", segmentReversed: [false], controlPoints: [[]],
+    id: uid(), name: `Route ${number}`, color: "#171715", segmentReversed: [false], controlPoints: [[]], segmentSpeed: [null], markers: [], waitAfterMs: 0,
     waypoints: [
       { id: uid(), x: start.x, y: start.y, heading: start.heading, tangent: 30 },
       { id: uid(), x: clamp(start.x + offset), y: start.y, heading: start.heading, tangent: 30 },
@@ -188,3 +193,45 @@ export function newRoute(start, number) {
 }
 
 export { smoothJoin } from "./model.js";
+
+export function setSegmentSpeed(path, segment, speed) {
+  const next = copyPath(path);
+  next.segmentSpeed[segment] = Number.isFinite(speed) && speed > 0 ? speed : null;
+  return next;
+}
+
+/** Adds a named marker at curve parameter t on a segment. */
+export function addMarker(path, segment, t, name) {
+  const next = copyPath(path);
+  const marker = { id: uid(), name: name || `Marker ${next.markers.length + 1}`, segment, t: Math.min(1, Math.max(0, t)) };
+  next.markers = [...next.markers, marker];
+  return { path: next, marker };
+}
+
+export function updateMarker(path, markerId, changes) {
+  const next = copyPath(path);
+  next.markers = next.markers.map((marker) => (marker.id === markerId ? { ...marker, ...changes } : marker));
+  return copyPath(next);
+}
+
+export function deleteMarker(path, markerId) {
+  const next = copyPath(path);
+  next.markers = next.markers.filter((marker) => marker.id !== markerId);
+  return next;
+}
+
+export function setWaitAfter(path, milliseconds) {
+  const next = copyPath(path);
+  next.waitAfterMs = Number.isFinite(milliseconds) && milliseconds > 0 ? Math.round(milliseconds) : 0;
+  return next;
+}
+
+/** Moves a route one place earlier (-1) or later (+1) in the auton order. */
+export function moveRoute(paths, pathId, delta) {
+  const index = paths.findIndex((path) => path.id === pathId);
+  const target = index + delta;
+  if (index < 0 || target < 0 || target >= paths.length) return paths;
+  const next = [...paths];
+  [next[index], next[target]] = [next[target], next[index]];
+  return next;
+}
