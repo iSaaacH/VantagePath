@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { dragPosition, bezierPoint, segmentPoint, setControlCount, DEFAULT_ROBOT, FIELD_SIZE, cornerToGps, cppExport, directionRuns, estimateLength, makeDocument, mirrorWaypoint, motionProfile, nearestPathDistance, profileDistance, profileTimeAtDistance, quinticPoint, reverseWaypoints, validateDocument, wrapRadians } from "./model.js";
+import { dragPosition, bezierPoint, segmentPoint, setControlCount, DEFAULT_ROBOT, FIELD_SIZE, cornerToGps, cppExport, directionRuns, estimateLength, makeDocument, mirrorWaypoint, motionProfile, nearestPathDistance, profileDistance, profileTimeAtDistance, quinticPoint, reverseWaypoints, robotStartPose, validateDocument, wrapRadians } from "./model.js";
 
 assert.equal(FIELD_SIZE, 144, "the playable floor is exactly 144 inches");
 assert.deepEqual(
@@ -26,8 +26,8 @@ assert.match(cppExport(document,"bad-name","corner"),/generatedPath/);
 document.paths[0].segmentReversed = [false, true];
 assert.deepEqual(directionRuns(document.paths[0]).map((run) => run.reversed), [false, true]);
 const mixedExport = cppExport(document,"competitionAuto","corner");
-assert.match(mixedExport,/competitionAutoSegment1Config[\s\S]*config\.reversed = false/);
-assert.match(mixedExport,/competitionAutoSegment2Config[\s\S]*config\.reversed = true/);
+assert.match(mixedExport,/competitionAutoSection1Config[\s\S]*config\.reversed = false/);
+assert.match(mixedExport,/competitionAutoSection2Config[\s\S]*config\.reversed = true/);
 assert.match(mixedExport,/competitionAutoTrajectories/, "mixed direction sections are exported in execution order");
 // A reversed segment must back out of a waypoint: with the nose pointing "up"
 // (heading = +y) toward a goal above it, driving in reverse to a point below
@@ -42,11 +42,12 @@ assert.ok(reverseStep.y < goal.y, "reversed tangent backs out opposite the nose 
 // A reversed export run rotates its authored nose headings by π so the forward
 // geometry the C++ generator builds becomes the intended back-out curve.
 const reverseDoc = makeDocument();
+reverseDoc.paths[0].controlPoints = [null, null];
 reverseDoc.paths[0].segmentReversed = [false, true];
 const reverseExport = cppExport(reverseDoc, "competitionAuto", "corner");
 const flippedHeading = wrapRadians(reverseDoc.paths[0].waypoints[2].heading + Math.PI).toFixed(6);
 assert.match(reverseExport, new RegExp(`${flippedHeading}}`), "reversed run emits π-rotated headings");
-assert.match(reverseExport, /Segment2[\s\S]*config\.reversed = true/, "reversed run still flags config.reversed");
+assert.match(reverseExport, /Section2[\s\S]*config\.reversed = true/, "reversed run still flags config.reversed");
 
 const profile = motionProfile(120, document.robot);
 assert.ok(profile.duration > 0); assert.equal(profileDistance(profile, profile.duration), 120);
@@ -77,6 +78,7 @@ assert.throws(() => validateDocument(bezierDoc), /Control coordinates/);
 
 // P1 on the first route is the canonical robot start, including old files.
 const startDocument = makeDocument();
+startDocument.paths[0].controlPoints = [null, null]; // Hermite: P1 heading is authored
 startDocument.robotStart = {x:30.25,y:48.5,heading:Math.PI/2};
 startDocument.paths[0].waypoints[0] = {...startDocument.paths[0].waypoints[0],x:30.25,y:48.5,heading:Math.PI/2};
 const startReloaded = validateDocument(JSON.parse(JSON.stringify(startDocument)));
@@ -91,6 +93,10 @@ assert.equal(validateDocument(startLegacy).robotStart.x,60,'P1 remains the canon
 assert.match(cppExport(startDocument,'autoRoute'), /const vantage::Pose2d autoRouteRobotStart = \{30\.2500, 48\.5000, 1\.570796\}/);
 assert.match(cppExport(startDocument,'autoRoute','gps'), /autoRouteRobotStartGps = \{-1\.0604, -0\.5969, 0\.000000\}/);
 assert.match(cppExport(startDocument,'autoRoute','gps'), /vantage::vexGpsToCorner\(autoRouteRobotStartGps/);
+// On a Bézier first segment the robot starts along the curve, not the stored value.
+const bezierStart = makeDocument();
+bezierStart.paths[0].waypoints[0].heading = 2.5;
+assert.ok(Math.abs(robotStartPose(bezierStart).heading) < 1e-12, "Bézier P1 faces its first control, (44,18)");
 startDocument.robotStart.x = Infinity;
 assert.equal(validateDocument(startDocument).robotStart.x,30.25,'stale standalone start data is replaced by P1');
 

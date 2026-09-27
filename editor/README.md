@@ -11,10 +11,18 @@ step. Documents autosave in the browser and can be downloaded as `.vpath`
 JSON. C++ export supports the bottom-left corner authoring frame or the official
 VEX GPS centre frame.
 
-Run the pure model tests with:
+Run the editor tests with:
 
 ```sh
-node --test editor/model.test.mjs
+node --test editor/*.test.mjs
+```
+
+`planner.js` is a port of the geometry and speed passes in `src/trajectory.cpp`,
+so preview times and stops match what the robot runs. Check that the two still
+agree, and that every exported header compiles and generates, with:
+
+```sh
+node tests/studio/crosscheck.mjs   # needs a C++17 compiler (CXX to choose)
 ```
 
 ## Routes and control points

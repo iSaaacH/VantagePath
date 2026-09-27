@@ -213,3 +213,34 @@ button:disabled { cursor:not-allowed; opacity:.35; }
 .point-legend { font-size:11px; }
 .canvas-help { font-size:9px; text-transform:none; letter-spacing:0; }
 @media(max-width:720px) { .canvas-help { font-size:8px; } }
+
+/* Phase 1: heading convention, save state, route checks, stop markers. */
+.heading-mode { align-items:center; display:flex; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10px; gap:8px; text-transform:uppercase; }
+.heading-mode select { background:var(--paper); border:1px solid var(--ink); border-radius:999px; font-size:12px; padding:6px 10px; text-transform:none; }
+.live-state.is-error { color:var(--red); }
+.live-state.is-error i { background:var(--red); }
+.live-state span { font-size:13px; }
+.checks-section { background:#fffdf7; }
+.checks-list { display:grid; gap:8px; list-style:none; margin:12px 0 0; padding:0; }
+.check { border:1px solid var(--line); border-left:4px solid var(--muted); border-radius:4px; display:grid; gap:6px; padding:8px 10px; }
+.check.is-error { border-left-color:var(--red); background:rgba(237,68,56,.06); }
+.check.is-warning { border-left-color:#e0a100; background:rgba(224,161,0,.07); }
+.check.is-info { border-left-color:var(--blue); }
+.check.is-ok { border-left-color:#3a9a4c; color:var(--muted); font-size:12px; line-height:1.45; }
+.check-body { background:none; border:0; display:grid; gap:3px; padding:0; text-align:left; }
+.check-body b { font-size:12px; }
+.check-body span { color:var(--muted); font-size:12px; line-height:1.4; }
+.check-body:hover b { color:var(--blue); }
+.check-fix { background:var(--acid); border:1px solid var(--ink); border-radius:4px; font-size:12px; font-weight:650; justify-self:start; min-height:32px; padding:6px 12px; }
+.legend-stop { background:#c9372c; clip-path:polygon(30% 0,70% 0,100% 30%,100% 70%,70% 100%,30% 100%,0 70%,0 30%); display:inline-block; height:10px; width:10px; }
+.stop-marker path { fill:#c9372c; stroke:#fff; stroke-width:.45; }
+.stop-marker.is-warning path { fill:#e0a100; stroke:var(--ink); }
+.stop-marker { pointer-events:all; }
+.issue-marker circle { fill:none; stroke-dasharray:1.2 .8; stroke-width:.7; }
+.issue-marker.is-warning circle { stroke:#e0a100; }
+.issue-marker.is-error circle { stroke:var(--red); }
+.issue-marker.is-info circle { stroke:var(--blue); }
+.issue-marker text { fill:#e0a100; font:700 3.4px ui-monospace,monospace; paint-order:stroke; stroke:#111; stroke-width:.5px; text-anchor:middle; }
+.danger-action.is-armed { background:var(--red); color:#fff; padding:6px 8px; }
+.field-pair label em { color:var(--muted); font-style:normal; text-transform:none; }
+@media(max-width:1100px){ .heading-mode>span { display:none; } }

@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f1ede4" />
     <title>VantagePath Studio</title>
-    <link rel="stylesheet" href="styles.css?v=route-headings-1" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23171715'/%3E%3Ctext x='16' y='21' font-family='monospace' font-size='13' font-weight='700' fill='%23d9ff48' text-anchor='middle'%3EVP%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="styles.css?v=studio-2" />
   </head>
   <body>
     <main class="app-shell">
@@ -13,9 +14,13 @@
         <button class="brand" data-action="home" aria-label="VantagePath home">
           <span class="brand-mark">VP</span><span>VantagePath / Studio</span>
         </button>
-        <nav class="mode-nav" aria-label="Editor mode">
-          <button class="is-active" data-action="select-tool">Path editor</button>
-        </nav>
+        <label class="heading-mode" title="How headings are shown and typed. Export always writes library radians.">
+          <span>Headings</span>
+          <select id="heading-mode" aria-label="Heading convention">
+            <option value="math">0° right · CCW</option>
+            <option value="compass">0° up · CW (compass)</option>
+          </select>
+        </label>
         <div class="file-actions">
           <button data-action="open">Open</button>
           <button data-action="save">Save .vpath</button>
@@ -29,7 +34,7 @@
         <dl>
           <div><dt>Origin</dt><dd>Bottom-left <span>(0, 0)</span></dd></div>
           <div><dt>Field</dt><dd>144 × 144 <span>in</span></dd></div>
-          <div><dt>Autosave</dt><dd class="live-state"><i></i> Local</dd></div>
+          <div><dt>Autosave</dt><dd class="live-state" id="save-state" role="status"><i></i> <span>Saved in browser</span></dd></div>
         </dl>
       </section>
 
@@ -43,7 +48,7 @@
               <label><span>Y / in</span><input id="start-y" data-start="y" type="number" min="0" max="144" step="0.25" /></label>
             </div>
             <label class="start-heading-input"><span>Facing / °</span><input id="start-heading" data-start="heading" type="number" step="1" /></label>
-            <small>0° right · 90° up. Drag P1 or edit these fields—both stay in sync.</small>
+            <small id="start-heading-note"><span data-heading-label>0° right · 90° up</span>. Drag P1 or edit these fields—both stay in sync.</small>
           </section>
           <div class="rail-heading"><div><span class="section-index">01 / Routes</span><h2>Routes</h2></div><button class="square-button" data-action="new-path" aria-label="Add path">+</button></div>
           <div class="route-toolbar"><span id="route-count"></span><button data-action="duplicate-path">Duplicate</button></div>
@@ -60,8 +65,7 @@
         <section class="canvas-panel">
           <div class="canvas-toolbar">
             <div class="tool-group" aria-label="Edit tools">
-              <button class="tool is-active" data-action="select-tool" title="Select (V)">↖ <span>Select</span></button>
-              <button class="tool" data-action="add-point" title="Add route point (A)">＋ <span>Route point</span></button>
+              <button class="tool" data-action="add-point" title="Add a route point after the last one (A)">＋ <span>Route point</span></button>
               <button class="tool" data-action="delete-point" title="Delete selected">− <span>Delete</span></button>
             </div>
             <div class="tool-group">
@@ -75,14 +79,15 @@
             <svg id="field" viewBox="-9 -9 162 162" role="img" aria-label="Interactive VEX Override field path editor"></svg>
             <div class="axis axis-x">X → 144″</div><div class="axis axis-y">Y → 144″</div>
             <div class="coordinate-readout" id="coordinate-readout">X 0.0 · Y 0.0</div>
-            <output class="heading-readout" id="heading-readout" aria-label="Preview robot heading" title="Preview heading · 0° right · 90° up">θ 0.0°</output>
-            <div class="canvas-help">Drag robot: scrub preview · Alt: ⅕-speed points · Shift: no snap · Double-click: add route point</div>
+            <output class="heading-readout" id="heading-readout" aria-label="Preview robot heading" title="Preview heading">θ 0.0°</output>
+            <div class="canvas-help">Double-click or long-press: add point (on the path: insert) · Arrows: nudge 1″ (Shift 6″, Alt ¼″) · Drag robot: scrub · Alt-drag: fine · Shift-drag: no snap</div>
             <div class="field-credit">Orthographic field by <a href="https://field-rendering.jerryio.com/" target="_blank" rel="noopener">Jerry Lum</a> · CC BY 4.0 · exact 144″ floor crop</div>
           </div>
           <div class="point-legend" aria-label="Field marker guide">
             <span><i class="legend-point"></i><b>P · Route point</b> Robot passes through</span>
             <span><i class="legend-control"></i><b>C · Control point</b> Bends the curve</span>
             <span><i class="legend-start"></i><b>P1</b> Robot start on the first route</span>
+            <span><i class="legend-stop"></i><b>Stop</b> Robot comes to rest</span>
           </div>
           <div class="timeline">
             <div><span class="section-index">03 / Preview · estimated</span><strong id="path-summary">3 anchors · 0.0 in</strong></div>
@@ -97,6 +102,11 @@
 
         <aside class="rail inspector-rail">
           <div class="rail-heading"><div><span class="section-index">02 / Controls</span><h2>Inspector</h2></div><span id="selection-index">P01</span></div>
+
+          <section class="inspector-section checks-section" aria-labelledby="checks-title">
+            <div class="section-label"><span id="checks-title">Route checks</span><small id="checks-count"></small></div>
+            <ul id="checks-list" class="checks-list"></ul>
+          </section>
 
           <section class="inspector-section curve-section">
             <div class="section-label"><span>Segment geometry</span></div>
@@ -124,7 +134,7 @@
               <label><span>Y / in</span><input id="point-y" type="number" min="0" max="144" step="0.1" /></label>
             </div>
             <div class="field-pair" id="heading-fields">
-              <label><span>Heading / °</span><input id="point-heading" type="number" step="1" /></label>
+              <label><span>Heading / ° <em data-heading-short></em></span><input id="point-heading" type="number" step="1" /></label>
               <label><span>Tangent / in</span><input id="point-tangent" type="number" min="1" step="1" /></label>
             </div>
           </section>
@@ -162,6 +172,9 @@
                 <label><span>Start velocity</span><input id="robot-start-velocity" data-robot="startVelocity" type="number" min="0" step="1" /></label>
                 <label><span>End velocity</span><input id="robot-end-velocity" data-robot="endVelocity" type="number" min="0" step="1" /></label>
               </div>
+              <div class="field-pair">
+                <label title="Spacing of trajectory samples on the robot. Smaller is smoother but uses more memory."><span>Sample spacing / in</span><input id="robot-sample-distance" data-robot="sampleDistance" type="number" min="0.05" max="2" step="0.05" /></label>
+              </div>
             </details>
           </section>
           </details>
@@ -170,7 +183,8 @@
           <section class="inspector-section mirror-section">
             <div class="section-label"><span>Mirror path</span><small>all actions are undoable</small></div>
             <div class="mirror-grid">
-              <button class="mirror-primary" data-action="mirror-quadrant"><b>◩</b><span>Opposite quadrant</span><small>Same alliance · across single white line</small></button>
+              <button class="mirror-primary" data-action="mirror-alliance-copy"><b>⟲</b><span>Red ↔ Blue copy</span><small>New route · rotated 180° for the other alliance</small></button>
+              <button data-action="mirror-quadrant"><b>◩</b><span>Opposite quadrant</span><small>Same alliance · across white line</small></button>
               <button data-action="mirror-left-right"><b>↔</b><span>Left / right</span><small>Across X centre</small></button>
               <button data-action="mirror-bottom-top"><b>↕</b><span>Bottom / top</span><small>Across Y centre</small></button>
             </div>
@@ -186,11 +200,11 @@
           </section>
           </details>
 
-          <button class="danger-action" data-action="delete-path">Delete active path</button>
+          <button class="danger-action" data-action="delete-path" id="delete-path">Delete active route</button>
         </aside>
       </section>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
     </main>
-    <script type="module" src="app.js?v=route-headings-1"></script>
+    <script type="module" src="app.js?v=studio-2"></script>
   </body>
 </html>

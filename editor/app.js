@@ -1,6 +1,15 @@
-import { dragPosition, FIELD_SIZE, clamp, cppExport, estimateLength, makeDocument, mirrorWaypoint, motionProfile, nearestPathDistance, normalizeSegmentDirections, profileDistance, profileTimeAtDistance, robotStartPose, segmentPoint, setControlCount, reverseWaypoints, validateDocument, wrapRadians } from "./model.js";
+import { analyzeRoute } from "./analysis.js";
+import { anchorHeading, dragPosition, FIELD_SIZE, clamp, cppExport, fromDisplayHeading, historySnapshot, isHeadingDerived, makeDocument, mirrorWaypoint, nearestPathDistance, normalizeSegmentDirections, restoreSnapshot, robotStartPose, segmentPoint, setControlCount, smoothJoin, splitSegment, reverseWaypoints, toDisplayHeading, validateDocument, withDerivedHeadings, wrapRadians } from "./model.js";
+import { planRoute, poseAtTime, routeSamples, segmentTangent, timeAtDistance } from "./planner.js";
 
 const STORAGE_KEY = "vantagepath-studio-v1";
+const PREFS_KEY = "vantagepath-studio-prefs";
+const NUDGE_COALESCE_MS = 800;
+const LONG_PRESS_MS = 550;
+const LONG_PRESS_SLOP_IN = 1.5;
+const INSERT_HIT_IN = 2.5;
+const DELETE_CONFIRM_MS = 3000;
+const NEW_POINT_STEP_IN = 24;
 const svg = document.querySelector("#field");
 const stage = document.querySelector("#field-stage");
 const fileInput = document.querySelector("#file-input");
@@ -19,11 +28,18 @@ const pointInputs = {
 const robotInputs = [...document.querySelectorAll("[data-robot]")];
 const scrubber = document.querySelector("#path-scrubber");
 
+let startupMessage = "";
 let documentState = loadLocal();
+let prefs = loadPrefs();
 let activePathId = documentState.paths[0]?.id ?? null;
 let selectedPointId = documentState.paths[0]?.waypoints[0]?.id ?? null;
-let history = [JSON.stringify(documentState)];
+let history = [historySnapshot(documentState)];
 let historyIndex = 0;
+let lastCoalesce = { key: null, at: 0 };
+let planCache = { key: "", plan: null, issues: [] };
+let saveState = { ok: true, at: null };
+let deleteArmedUntil = 0;
+let longPress = null;
 let drag = null;
 let toastTimer = 0;
 let playback = { playing:false, time:0, startedAt:0, startedFrom:0, frame:0 };
@@ -34,89 +50,111 @@ function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (character
 function uid() { return crypto.randomUUID(); }
 function snap(value, bypass = false) { return documentState.snap && !bypass ? Math.round(value / documentState.snapStep) * documentState.snapStep : value; }
 
+function readStorage(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
 function loadLocal() {
-  try { return validateDocument(JSON.parse(localStorage.getItem(STORAGE_KEY))) } catch { return makeDocument(); }
+  const raw = readStorage(STORAGE_KEY);
+  if (raw === null) return makeDocument();
+  try {
+    return validateDocument(JSON.parse(raw));
+  } catch (error) {
+    // Keep the unreadable copy so the next autosave can't destroy it.
+    const backupKey = `${STORAGE_KEY}-unreadable-${Date.now()}`;
+    try { localStorage.setItem(backupKey, raw); } catch { /* storage full or blocked */ }
+    startupMessage = `Your saved route couldn't be read (${error instanceof Error ? error.message : "unknown error"}). A copy was kept as "${backupKey}"; starting fresh.`;
+    return makeDocument();
+  }
+}
+
+function loadPrefs() {
+  try {
+    const stored = JSON.parse(readStorage(PREFS_KEY) ?? "{}");
+    return { headingMode: stored.headingMode === "compass" ? "compass" : "math" };
+  } catch { return { headingMode: "math" }; }
+}
+
+function savePrefs() {
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* preferences are optional */ }
 }
 
 function persist() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(documentState));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(documentState));
+    saveState = { ok: true, at: new Date() };
+  } catch (error) {
+    saveState = { ok: false, at: new Date(), reason: error instanceof Error ? error.message : "storage unavailable" };
+  }
+  renderSaveState();
 }
 
-function commit(message) {
+function renderSaveState() {
+  const node = document.querySelector("#save-state");
+  if (!node) return;
+  node.classList.toggle("is-error", !saveState.ok);
+  const time = saveState.at ? ` ${saveState.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "";
+  node.querySelector("span").textContent = saveState.ok ? `Saved in browser${time}` : "Not saved — use Save .vpath";
+  node.title = saveState.ok ? "Changes autosave to this browser. Save .vpath to keep a file." : `Autosave failed: ${saveState.reason}`;
+}
+
+// Route edits go through here. View preferences (alliance, snap, zones) use
+// setView() instead so undo never flips them.
+function commit(message, { coalesce = null } = {}) {
   stopPlayback(true);
+  documentState.paths = documentState.paths.map(withDerivedHeadings);
   documentState.robotStart = robotStartPose(documentState);
-  const serial = JSON.stringify(documentState);
+  const serial = historySnapshot(documentState);
+  const now = performance.now();
+  const merge = coalesce && lastCoalesce.key === coalesce && now - lastCoalesce.at < NUDGE_COALESCE_MS && historyIndex > 0;
   if (history[historyIndex] !== serial) {
-    history = history.slice(0, historyIndex + 1);
-    history.push(serial);
-    historyIndex += 1;
+    if (merge) history[historyIndex] = serial;
+    else {
+      history = history.slice(0, historyIndex + 1);
+      history.push(serial);
+      historyIndex += 1;
+    }
   }
+  lastCoalesce = { key: coalesce, at: now };
   persist(); render();
   if (message) notify(message);
 }
 
-function pathSamples(path, subdivisions = 50) {
-  if (!path?.waypoints.length) return [];
-  normalizeSegmentDirections(path);
-  const samples = [{ x:path.waypoints[0].x, y:path.waypoints[0].y, distance:0, heading:path.waypoints[0].heading, segmentIndex:0 }];
-  if (path.waypoints.length > 1 && Array.isArray(path.controlPoints[0])) {
-    const next = segmentPoint(path, 0, 0.0001);
-    samples[0].heading = Math.atan2(next.y-samples[0].y, next.x-samples[0].x);
-  }
-  let distance = 0;
-  for (let index = 0; index + 1 < path.waypoints.length; index += 1) {
-    let previous = samples.at(-1);
-    for (let step = 1; step <= subdivisions; step += 1) {
-      const point = segmentPoint(path, index, step / subdivisions);
-      const segment = Math.hypot(point.x - previous.x, point.y - previous.y);
-      distance += segment;
-      const heading = segment > 1e-6 ? Math.atan2(point.y - previous.y, point.x - previous.x) : previous.heading;
-      const sample = { ...point, distance, heading, segmentIndex:index };
-      samples.push(sample); previous = sample;
-    }
-  }
-  return samples;
+function setView(key, value) {
+  documentState[key] = value;
+  persist(); render();
 }
 
-function playbackData() {
-  const samples = pathSamples(activePath());
-  return { samples, profile:motionProfile(samples.at(-1)?.distance ?? 0, documentState.robot) };
-}
+function headingText(radians) { return `${toDisplayHeading(radians, prefs.headingMode).toFixed(1)}°`; }
 
-function poseAtDistance(samples, distance, path) {
-  if (!samples.length) return null;
-  let upperIndex = samples.findIndex((sample) => sample.distance >= distance);
-  if (upperIndex < 0) upperIndex = samples.length - 1;
-  const upper = samples[upperIndex];
-  const lower = samples[Math.max(0, upperIndex - 1)];
-  const span = upper.distance - lower.distance;
-  const ratio = span > 1e-6 ? (distance - lower.distance) / span : 0;
-  const waypoints = path?.waypoints ?? [];
-  // The nose follows the direction of travel, flipped 180° on reversed segments
-  // (the robot backs along the curve). At the exact anchors the authored nose
-  // wins so the display never snaps at a forward/reverse cusp.
-  let heading = upper.heading;
-  if (path?.segmentReversed?.[upper.segmentIndex]) heading = wrapRadians(heading + Math.PI);
-  if (upperIndex <= 0 && !Array.isArray(path?.controlPoints?.[0])) heading = waypoints[0]?.heading ?? heading;
-  else if (upperIndex === samples.length - 1 && !Array.isArray(path?.controlPoints?.at(-1))) heading = waypoints.at(-1)?.heading ?? heading;
-  return { x:lower.x + (upper.x - lower.x) * ratio, y:lower.y + (upper.y - lower.y) * ratio, heading };
+// The planned route (planner.js) for the active path, recomputed only when the
+// path or robot changes. Timing and stops match the exported C++ trajectories.
+function routePlan() {
+  const path = activePath();
+  const key = JSON.stringify([path, documentState.robot]);
+  if (planCache.key !== key) {
+    const plan = planRoute(path, documentState.robot);
+    planCache = { key, plan, issues: analyzeRoute(path, plan, documentState.robot) };
+  }
+  return planCache;
 }
 
 function updatePlaybackUi() {
-  const { samples, profile } = playbackData();
-  playback.time = Math.min(playback.time, profile.duration);
-  const progress = profile.duration > 0 ? playback.time / profile.duration : 0;
+  const { plan } = routePlan();
+  playback.time = Math.min(playback.time, plan.duration);
+  const progress = plan.duration > 0 ? playback.time / plan.duration : 0;
   scrubber.value = String(Math.round(progress * 1000));
-  document.querySelector("#playback-time").textContent = `${playback.time.toFixed(1)} / ${profile.duration.toFixed(1)} s`;
+  const pose = poseAtTime(plan, playback.time);
+  const speed = pose ? ` · ${Math.abs(pose.velocity).toFixed(0)} in/s` : "";
+  document.querySelector("#playback-time").textContent = `${playback.time.toFixed(1)} / ${plan.duration.toFixed(1)} s${speed}`;
   const button = document.querySelector("#play-path");
   button.textContent = playback.playing ? "❚❚" : "▶";
   button.setAttribute("aria-label", playback.playing ? "Pause path" : "Play full path");
-  const pose = poseAtDistance(samples, profileDistance(profile, playback.time), activePath());
   const heading = pose?.heading ?? documentState.robotStart.heading;
-  document.querySelector("#heading-readout").textContent = `θ ${(wrapRadians(heading) * 180 / Math.PI).toFixed(1)}°`;
+  document.querySelector("#heading-readout").textContent = `θ ${headingText(heading)}`;
   const robot = document.querySelector("#playback-robot");
   if (robot) {
-    robot.style.display = samples.length > 1 ? "" : "none";
+    robot.style.display = plan.steps.length ? "" : "none";
     robot.classList.toggle("is-dragging", drag?.type === "playback");
   }
   if (pose && robot) robot.setAttribute("transform", `translate(${pose.x} ${FIELD_SIZE - pose.y}) rotate(${-pose.heading * 180 / Math.PI})`);
@@ -131,7 +169,7 @@ function stopPlayback(reset = false) {
 
 function playbackFrame(now) {
   if (!playback.playing) return;
-  const duration = playbackData().profile.duration;
+  const duration = routePlan().plan.duration;
   playback.time = Math.min(duration, playback.startedFrom + (now - playback.startedAt) / 1000);
   if (playback.time >= duration) playback.playing = false;
   updatePlaybackUi();
@@ -140,7 +178,9 @@ function playbackFrame(now) {
 }
 
 function togglePlayback() {
-  const duration = playbackData().profile.duration;
+  const { plan } = routePlan();
+  const duration = plan.duration;
+  if (plan.error) return notify(`Can't play: ${plan.error}`);
   if (!(duration > 0)) return notify("Add at least two waypoints to play the path");
   if (playback.playing) return stopPlayback(false);
   if (playback.time >= duration) playback.time = 0;
@@ -153,7 +193,8 @@ function restore(index) {
   selectedControlId = null;
   stopPlayback(true);
   historyIndex = index;
-  documentState = JSON.parse(history[index]);
+  lastCoalesce = { key: null, at: 0 };
+  documentState = restoreSnapshot(history[index], documentState);
   if (!documentState.paths.some((path) => path.id === activePathId)) activePathId = documentState.paths[0]?.id ?? null;
   if (!activePath()?.waypoints.some((point) => point.id === selectedPointId)) selectedPointId = activePath()?.waypoints[0]?.id ?? null;
   persist(); render();
@@ -216,7 +257,35 @@ function pathMarkup(path) {
   </g>`;
   // Keep route/control points above the player so they remain selectable when
   // the playback robot is parked directly on a point.
-  return `${curves.join("")}${robotMarkup}${bezierControls}${controls}`;
+  return `${curves.join("")}${checksMarkup()}${robotMarkup}${bezierControls}${controls}`;
+}
+
+// Stops and problems drawn on the field, under the editable markers.
+function checksMarkup() {
+  const { plan, issues } = routePlan();
+  const flagged = new Set(issues.filter((issue) => issue.action === "smooth").map((issue) => issue.waypointIndex));
+  const stops = plan.stops.map((stop) => {
+    const warn = flagged.has(stop.waypointIndex);
+    const why = stop.reason === "corner" ? "sharp corner: stops and turns in place" : stop.reason === "direction-change" ? "changes drive direction" : "Bézier join: the library stops here";
+    return `<g class="stop-marker${warn ? " is-warning" : ""}" transform="translate(${stop.x} ${FIELD_SIZE - stop.y})"><title>Robot stops at P${stop.waypointIndex + 1} · ${why}</title><path d="M-1.4 -3.4h2.8l2 2v2.8l-2 2h-2.8l-2-2v-2.8z"/></g>`;
+  }).join("");
+  const spots = issues.filter((issue) => !issue.action && Number.isFinite(issue.x)).map((issue) =>
+    `<g class="issue-marker is-${issue.severity}" transform="translate(${issue.x} ${FIELD_SIZE - issue.y})"><title>${escapeHtml(issue.title)}: ${escapeHtml(issue.detail)}</title><circle r="4.2"/><text y="1.3">!</text></g>`).join("");
+  return `<g class="checks-layer">${spots}${stops}</g>`;
+}
+
+function renderChecks() {
+  const { issues } = routePlan();
+  const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
+  const counts = ["error", "warning", "info"].map((severity) => issues.filter((issue) => issue.severity === severity).length);
+  const summary = [counts[0] && plural(counts[0], "error"), counts[1] && plural(counts[1], "warning"), counts[2] && plural(counts[2], "note")].filter(Boolean);
+  document.querySelector("#checks-count").textContent = summary.length ? summary.join(" · ") : "all clear";
+  document.querySelector("#checks-list").innerHTML = issues.length
+    ? issues.map((issue) => `<li class="check is-${issue.severity}">
+        <button class="check-body" data-check-point="${issue.waypointIndex}"><b>${escapeHtml(issue.title)}</b><span>${escapeHtml(issue.detail)}</span></button>
+        ${issue.action === "smooth" ? `<button class="check-fix" data-smooth-index="${issue.waypointIndex}">Smooth join</button>` : ""}
+      </li>`).join("")
+    : `<li class="check is-ok"><span>No stops to turn, walls or impossible curves. Planned with the same rules as the robot.</span></li>`;
 }
 
 function render() {
@@ -225,7 +294,15 @@ function render() {
   selectedSegment = Math.max(0, Math.min(selectedSegment, (path?.waypoints.length ?? 1)-2));
   svg.innerHTML = fieldMarkup() + pathMarkup(path);
   const start = robotStartPose(documentState);
-  document.querySelectorAll("[data-start]").forEach(input => { const key = input.dataset.start; input.value = (key === "heading" ? start.heading * 180 / Math.PI : start[key]).toFixed(2); });
+  document.querySelectorAll("[data-start]").forEach(input => { const key = input.dataset.start; input.value = (key === "heading" ? toDisplayHeading(start.heading, prefs.headingMode) : start[key]).toFixed(2); });
+  const startDerived = Boolean(documentState.paths[0]) && documentState.paths[0].waypoints.length > 1 && isHeadingDerived(documentState.paths[0], 0);
+  const startHeadingInput = document.querySelector("#start-heading");
+  startHeadingInput.disabled = startDerived;
+  startHeadingInput.title = startDerived ? "Set by the first Bézier segment. Move its first control point to change it." : "";
+  document.querySelector("#heading-mode").value = prefs.headingMode;
+  const headingLabel = prefs.headingMode === "compass" ? "0° up · 90° right" : "0° right · 90° up";
+  document.querySelectorAll("[data-heading-label]").forEach((node) => { node.textContent = startDerived ? `Facing follows the curve (${headingLabel})` : headingLabel; });
+  document.querySelectorAll("[data-heading-short]").forEach((node) => { node.textContent = prefs.headingMode === "compass" ? "(CW from +Y)" : "(CCW from +X)"; });
   const primaryPoint = documentState.paths[0]?.waypoints[0];
   document.querySelector("#robot-start-section").classList.toggle("is-selected", activePathId === documentState.paths[0]?.id && selectedPointId === primaryPoint?.id);
   titleNode.textContent = documentState.title;
@@ -243,22 +320,20 @@ function render() {
   Object.values(pointInputs).forEach((input) => { input.disabled = !point; });
   if (point) {
     pointInputs.x.value = point.x.toFixed(2); pointInputs.y.value = point.y.toFixed(2);
-    pointInputs.heading.value = (point.heading * 180 / Math.PI).toFixed(1); pointInputs.tangent.value = point.tangent.toFixed(1);
+    pointInputs.heading.value = toDisplayHeading(point.heading, prefs.headingMode).toFixed(1); pointInputs.tangent.value = point.tangent.toFixed(1);
     const index = path.waypoints.findIndex((candidate) => candidate.id === point.id);
     document.querySelector("#waypoint-label").textContent = `Route point P${index+1}`;
     document.querySelector("#selection-index").textContent = `P${String(index + 1).padStart(2,"0")}`;
   }
   if (selectedControlId) document.querySelector("#selection-index").textContent = `Control C${(path?.controlPoints[selectedSegment] ?? []).findIndex(p => p.id === selectedControlId)+1}`;
   document.querySelector("#waypoint-count").textContent = `${path?.waypoints.length ?? 0} ${(path?.waypoints.length ?? 0) === 1 ? "point" : "points"}`;
-  const headingSamples = pathSamples(path);
   waypointList.innerHTML = (path?.waypoints ?? []).map((item, index) => {
-    const sample = index === 0 ? headingSamples[0] : headingSamples.findLast(sample => sample.segmentIndex === index - 1);
-    const heading = poseAtDistance(headingSamples, sample?.distance ?? 0, path)?.heading ?? item.heading;
+    const heading = path.waypoints.length > 1 ? anchorHeading(path, index) : item.heading;
     return `<div class="waypoint-row ${item.id === selectedPointId ? "is-selected" : ""}">
     <button class="waypoint-select" data-select-point-id="${item.id}" aria-label="Select anchor ${index + 1}">P${String(index + 1).padStart(2,"0")}</button>
     <label><span class="visually-hidden">Anchor ${index + 1} X coordinate in inches</span><input data-coordinate-point-id="${item.id}" data-coordinate="x" type="number" min="0" max="144" step="0.25" value="${item.x.toFixed(2)}" /></label>
     <label><span class="visually-hidden">Anchor ${index + 1} Y coordinate in inches</span><input data-coordinate-point-id="${item.id}" data-coordinate="y" type="number" min="0" max="144" step="0.25" value="${item.y.toFixed(2)}" /></label>
-    <output class="waypoint-heading" aria-label="Route point ${index + 1} heading in degrees" title="Preview heading at P${index + 1} · 0° right · 90° up">${(wrapRadians(heading) * 180 / Math.PI).toFixed(1)}°</output>
+    <output class="waypoint-heading" aria-label="Route point ${index + 1} heading in degrees" title="Robot heading at P${index + 1}${isHeadingDerived(path, index) ? " (set by the curve)" : ""} · ${headingLabel}">${headingText(heading)}</output>
   </div>`;
   }).join("");
   segmentList.innerHTML = (path?.segmentReversed ?? []).map((reversed, index) => `<div class="segment-direction ${index === selectedSegment ? "is-current" : ""}">
@@ -270,7 +345,15 @@ function render() {
       <button class="${reversed ? "is-active" : ""}" data-direction-index="${index}" data-direction-value="true" aria-pressed="${reversed}">← Reverse</button>
     </div>
   </div>`).join("");
-  document.querySelector("#path-summary").textContent = `${path?.waypoints.length ?? 0} anchors · ${estimateLength(path?.waypoints ?? [], 24, path?.segmentReversed ?? [], path?.controlPoints ?? []).toFixed(1)} in`;
+  const { plan } = routePlan();
+  const stopCount = plan.stops.length;
+  document.querySelector("#path-summary").textContent = plan.error
+    ? `${path?.waypoints.length ?? 0} anchors · can't plan`
+    : `${path?.waypoints.length ?? 0} anchors · ${plan.length.toFixed(1)} in · ${plan.duration.toFixed(2)} s · ${stopCount} stop${stopCount === 1 ? "" : "s"}`;
+  renderChecks();
+  const deleteButton = document.querySelector("#delete-path");
+  deleteButton.textContent = performance.now() < deleteArmedUntil ? `Click again to delete “${path?.name ?? "route"}”` : "Delete active route";
+  deleteButton.classList.toggle("is-armed", performance.now() < deleteArmedUntil);
   const directions = path?.segmentReversed ?? [];
   document.querySelector("#direction-summary").textContent = directions.some(Boolean) ? (directions.every(Boolean) ? "All reverse" : "Mixed") : "All forward";
   document.querySelector("#snap-step").value = String(documentState.snapStep);
@@ -280,6 +363,7 @@ function render() {
   document.querySelectorAll("[data-alliance]").forEach((button) => button.classList.toggle("is-active", button.dataset.alliance === documentState.alliance));
   document.querySelector('[data-action="undo"]').disabled = historyIndex === 0;
   document.querySelector('[data-action="redo"]').disabled = historyIndex === history.length - 1;
+  renderSaveState();
   updatePlaybackUi();
 }
 
@@ -338,14 +422,69 @@ function svgCoordinates(event) {
   return { x: clamp(local.x), y: clamp(FIELD_SIZE - local.y) };
 }
 
-function addPoint(at = { x: 72, y: 72 }) {
+// Where the toolbar/A key puts a new point: a tile ahead of the last point in
+// the direction it faces, pulled back inside the field.
+function pointAhead(path) {
+  const last = path.waypoints.at(-1);
+  if (!last) return { x: 72, y: 72 };
+  const heading = path.waypoints.length > 1 ? anchorHeading(path, path.waypoints.length - 1) : last.heading;
+  const margin = Math.max(documentState.robot.length, documentState.robot.width) / 2;
+  const inside = (value) => clamp(value, margin, FIELD_SIZE - margin);
+  const ahead = { x: inside(last.x + Math.cos(heading) * NEW_POINT_STEP_IN), y: inside(last.y + Math.sin(heading) * NEW_POINT_STEP_IN) };
+  if (Math.hypot(ahead.x - last.x, ahead.y - last.y) > 1) return ahead;
+  return { x: last.x + (72 - last.x) / 2, y: last.y + (72 - last.y) / 2 };
+}
+
+// The segment and curve parameter nearest `at`, if it is close to the drawn path.
+function nearestOnPath(path, at) {
+  let best = null;
+  for (let index = 0; index + 1 < path.waypoints.length; index += 1) {
+    for (let step = 1; step < 100; step += 1) {
+      const t = step / 100;
+      const point = segmentPoint(path, index, t);
+      const distance = Math.hypot(point.x - at.x, point.y - at.y);
+      if (!best || distance < best.distance) best = { index, t, distance };
+    }
+  }
+  return best && best.distance <= INSERT_HIT_IN ? best : null;
+}
+
+// Double-click / long-press: insert on the path when aimed at it, else append.
+function addPointAt(at) {
+  const path = activePath();
+  if (!path) return;
+  normalizeSegmentDirections(path);
+  const hit = nearestOnPath(path, at);
+  if (!hit) return addPoint(at);
+  const { path: split, point } = splitSegment(path, hit.index, hit.t);
+  Object.assign(path, split);
+  selectedPointId = point.id; selectedControlId = null; selectedSegment = hit.index + 1;
+  commit(`Route point inserted as P${hit.index + 2}`);
+}
+
+function addPoint(at = pointAhead(activePath() ?? { waypoints: [] })) {
   const path = activePath();
   if (!path) return;
   selectedControlId = null;
   const previous = path.waypoints.at(-1);
   const heading = previous ? Math.atan2(at.y - previous.y, at.x - previous.x) : 0;
   const point = { id: uid(), x: snap(at.x), y: snap(at.y), heading, tangent: previous ? Math.max(18, Math.hypot(at.x - previous.x, at.y - previous.y)) : 30 };
-  path.waypoints.push(point); if (previous) { path.segmentReversed.push(false); path.controlPoints.push([]); } selectedPointId = point.id; commit("Waypoint added");
+  if (previous && Math.hypot(point.x - previous.x, point.y - previous.y) < 0.5) return notify("That's on top of the last point");
+  path.waypoints.push(point);
+  if (previous) {
+    const segments = path.segmentReversed.length;
+    // Carry on from the previous segment: same drive direction, and a first
+    // control along its end tangent so the new join is smooth, not a corner.
+    const reversed = segments > 0 ? path.segmentReversed[segments - 1] : false;
+    const controls = [];
+    if (segments > 0) {
+      const tangent = segmentTangent(path, segments - 1, 1);
+      const reach = Math.hypot(point.x - previous.x, point.y - previous.y) / 3;
+      controls.push({ id: uid(), x: clamp(previous.x + Math.cos(tangent) * reach), y: clamp(previous.y + Math.sin(tangent) * reach) });
+    }
+    path.segmentReversed.push(reversed); path.controlPoints.push(controls);
+  }
+  selectedPointId = point.id; commit("Waypoint added");
 }
 
 function deletePoint() {
@@ -377,6 +516,34 @@ function transformPath(mode) {
   commit(mode === "quadrant" ? "Mirrored to the opposite same-alliance quadrant" : "Path mirrored");
 }
 
+function mirroredAllianceCopy() {
+  const original = activePath(); if (!original) return;
+  const copy = structuredClone(original);
+  copy.id = uid();
+  copy.name = /\(blue\)$/i.test(copy.name) ? copy.name.replace(/\(blue\)$/i, "(red)") : /\(red\)$/i.test(copy.name) ? copy.name.replace(/\(red\)$/i, "(blue)") : `${copy.name} (${documentState.alliance === "blue" ? "red" : "blue"})`;
+  copy.waypoints = copy.waypoints.map((point) => ({ ...mirrorWaypoint(point, "alliance"), id: uid() }));
+  copy.controlPoints = copy.controlPoints.map((items) => items?.map((p) => { const mirrored = mirrorWaypoint({ ...p, heading:0 }, "alliance"); return { id:uid(), x:mirrored.x, y:mirrored.y }; }) ?? null);
+  documentState.paths.push(copy); activePathId = copy.id; selectedPointId = copy.waypoints[0]?.id ?? null; selectedControlId = null;
+  commit(`Created “${copy.name}” for the other alliance`);
+}
+
+function smoothAt(index) {
+  const path = activePath(); if (!path) return;
+  Object.assign(path, smoothJoin(path, index));
+  selectedPointId = path.waypoints[index]?.id ?? selectedPointId; selectedControlId = null;
+  commit(`Join at P${index + 1} smoothed`);
+}
+
+function nudgeSelection(dx, dy) {
+  const path = activePath(); if (!path) return;
+  const target = selectedControlId
+    ? path.controlPoints[selectedSegment]?.find((p) => p.id === selectedControlId)
+    : selectedPoint();
+  if (!target) return;
+  target.x = clamp(target.x + dx); target.y = clamp(target.y + dy);
+  commit(null, { coalesce: `nudge:${selectedControlId ?? selectedPointId}` });
+}
+
 function newPath() {
   selectedSegment = 0; selectedControlId = null;
   const number = documentState.paths.length + 1;
@@ -402,7 +569,6 @@ function runAction(action) {
     activePathId = primary.id; selectedPointId = point.id; selectedSegment = 0; selectedControlId = null;
     stopPlayback(true); render(); return;
   }
-  if (action === "select-tool") { notify("Select tool active"); return; }
   if (action === "duplicate-path") {
     const original = activePath(); if (!original) return;
     const copy = structuredClone(original); copy.id = uid(); copy.name += " copy";
@@ -421,6 +587,7 @@ function runAction(action) {
   if (action === "delete-point") return deletePoint();
   if (action === "undo") return restore(historyIndex - 1);
   if (action === "redo") return restore(historyIndex + 1);
+  if (action === "mirror-alliance-copy") return mirroredAllianceCopy();
   if (action === "mirror-quadrant") return transformPath("quadrant");
   if (action === "mirror-left-right") return transformPath("left-right");
   if (action === "mirror-bottom-top") return transformPath("bottom-top");
@@ -434,6 +601,13 @@ function runAction(action) {
   if (action === "play-path") return togglePlayback();
   if (action === "delete-path") {
     if (!activePath()) return;
+    if (performance.now() > deleteArmedUntil) {
+      deleteArmedUntil = performance.now() + DELETE_CONFIRM_MS;
+      render();
+      setTimeout(render, DELETE_CONFIRM_MS + 50);
+      return;
+    }
+    deleteArmedUntil = 0;
     documentState.paths = documentState.paths.filter((path) => path.id !== activePathId);
     if (!documentState.paths.length) { newPath(); return; }
     activePathId = documentState.paths[0].id; selectedPointId = activePath().waypoints[0]?.id ?? null; commit("Path deleted"); return;
@@ -474,7 +648,14 @@ document.addEventListener("click", (event) => {
   const pointButton = event.target.closest("[data-select-point-id]");
   if (pointButton) { selectedControlId = null; selectedPointId = pointButton.dataset.selectPointId; stopPlayback(true); render(); }
   const alliance = event.target.closest("[data-alliance]")?.dataset.alliance;
-  if (alliance) { documentState.alliance = alliance; commit(`${alliance[0].toUpperCase()+alliance.slice(1)} field view selected`); }
+  if (alliance) { setView("alliance", alliance); notify(`${alliance[0].toUpperCase()+alliance.slice(1)} field view selected`); }
+  const smooth = event.target.closest("[data-smooth-index]");
+  if (smooth) smoothAt(Number(smooth.dataset.smoothIndex));
+  const check = event.target.closest("[data-check-point]");
+  if (check) {
+    const point = activePath()?.waypoints[Number(check.dataset.checkPoint)];
+    if (point) { selectedPointId = point.id; selectedControlId = null; stopPlayback(true); render(); }
+  }
 });
 
 waypointList.addEventListener("change", (event) => {
@@ -494,11 +675,12 @@ svg.addEventListener("pointerdown", event => {
   if (!target) return;
   if (target.dataset.playbackMarker) {
     stopPlayback(false);
-    const { samples, profile } = playbackData();
-    if (samples.length < 2 || !(profile.duration > 0)) return;
-    drag = { type:"playback", pointerId:event.pointerId, samples, profile };
+    const { plan } = routePlan();
+    const samples = routeSamples(plan);
+    if (samples.length < 2 || !(plan.duration > 0)) return;
+    drag = { type:"playback", pointerId:event.pointerId, samples, plan };
     svg.setPointerCapture(event.pointerId);
-    playback.time = profileTimeAtDistance(profile, nearestPathDistance(samples, svgCoordinates(event)));
+    playback.time = timeAtDistance(plan, nearestPathDistance(samples, svgCoordinates(event)));
     updatePlaybackUi(); event.preventDefault(); return;
   }
   stopPlayback(true);
@@ -517,7 +699,7 @@ svg.addEventListener("pointermove", event => {
   document.querySelector("#coordinate-readout").textContent = `X ${at.x.toFixed(2)} · Y ${at.y.toFixed(2)}`;
   if (!drag || drag.pointerId !== event.pointerId) return;
   if (drag.type === "playback") {
-    playback.time = profileTimeAtDistance(drag.profile, nearestPathDistance(drag.samples, at));
+    playback.time = timeAtDistance(drag.plan, nearestPathDistance(drag.samples, at));
     updatePlaybackUi(); return;
   }
   const step = documentState.snap && !event.shiftKey ? documentState.snapStep : 0;
@@ -542,12 +724,30 @@ svg.addEventListener("pointercancel", () => {
   if (drag.type === "playback") { drag = null; updatePlaybackUi(); return; }
   documentState = JSON.parse(drag.before); drag = null; render();
 });
-svg.addEventListener("dblclick", (event) => { if (!event.target.closest("[data-point-id],[data-handle-id],[data-control-id],[data-playback-marker]")) addPoint(svgCoordinates(event)); });
+const MARKER_SELECTOR = "[data-point-id],[data-handle-id],[data-control-id],[data-playback-marker]";
+svg.addEventListener("dblclick", (event) => { if (!event.target.closest(MARKER_SELECTOR)) addPointAt(svgCoordinates(event)); });
+
+// Touch has no double-click: press and hold on empty field to add a point.
+svg.addEventListener("pointerdown", (event) => {
+  if (event.pointerType === "mouse" || event.target.closest(MARKER_SELECTOR)) return;
+  const at = svgCoordinates(event);
+  clearTimeout(longPress?.timer);
+  longPress = { pointerId: event.pointerId, at, timer: setTimeout(() => { longPress = null; addPointAt(at); }, LONG_PRESS_MS) };
+});
+const cancelLongPress = (event) => {
+  if (!longPress || longPress.pointerId !== event.pointerId) return;
+  if (event.type === "pointermove") {
+    const at = svgCoordinates(event);
+    if (Math.hypot(at.x - longPress.at.x, at.y - longPress.at.y) < LONG_PRESS_SLOP_IN) return;
+  }
+  clearTimeout(longPress.timer); longPress = null;
+};
+["pointermove", "pointerup", "pointercancel"].forEach((type) => svg.addEventListener(type, cancelLongPress));
 
 for (const [key,input] of Object.entries(pointInputs)) input.addEventListener("change", () => {
   const point=selectedPoint(); if(!point) return;
   const value=Number(input.value); if(!Number.isFinite(value)) return render();
-  if(key === "heading") point.heading=wrapRadians(value*Math.PI/180);
+  if(key === "heading") point.heading=fromDisplayHeading(value, prefs.headingMode);
   else if(key === "tangent") point.tangent=Math.max(1,value);
   else point[key]=clamp(value);
   commit("Waypoint values updated");
@@ -563,7 +763,7 @@ robotInputs.forEach((input) => input.addEventListener("change", () => {
 
 scrubber.addEventListener("input", () => {
   stopPlayback(false);
-  playback.time = playbackData().profile.duration * Number(scrubber.value) / 1000;
+  playback.time = routePlan().plan.duration * Number(scrubber.value) / 1000;
   updatePlaybackUi();
 });
 
@@ -571,14 +771,17 @@ document.querySelectorAll("[data-start]").forEach(input => input.addEventListene
   const value = Number(input.value); if (!input.value || !Number.isFinite(value)) return render();
   const point = documentState.paths[0]?.waypoints[0]; if (!point) return notify("Add a route point first");
   const key = input.dataset.start;
-  point[key] = key === "heading" ? wrapRadians(value*Math.PI/180) : clamp(value);
+  point[key] = key === "heading" ? fromDisplayHeading(value, prefs.headingMode) : clamp(value);
   activePathId = documentState.paths[0].id; selectedPointId = point.id; selectedControlId = null;
   commit("Robot start / P1 updated");
 }));
-document.querySelector("#snap-step").addEventListener("change", event => { documentState.snapStep = Number(event.target.value); commit(); });
-
-document.querySelector("#snap-toggle").addEventListener("change", (event) => { documentState.snap=event.target.checked;commit(); });
-document.querySelector("#zone-toggle").addEventListener("change", (event) => { documentState.showZones=event.target.checked;commit(); });
+document.querySelector("#snap-step").addEventListener("change", event => setView("snapStep", Number(event.target.value)));
+document.querySelector("#snap-toggle").addEventListener("change", (event) => setView("snap", event.target.checked));
+document.querySelector("#zone-toggle").addEventListener("change", (event) => setView("showZones", event.target.checked));
+document.querySelector("#heading-mode").addEventListener("change", (event) => {
+  prefs = { ...prefs, headingMode: event.target.value === "compass" ? "compass" : "math" };
+  savePrefs(); render();
+});
 titleNode.addEventListener("blur", () => { documentState.title=titleNode.textContent.trim() || "Untitled path";commit(); });
 titleNode.addEventListener("keydown", (event) => { if(event.key === "Enter"){event.preventDefault();titleNode.blur();} });
 fileInput.addEventListener("change", async () => {
@@ -586,7 +789,7 @@ fileInput.addEventListener("change", async () => {
     if (!fileInput.files.length) return;
     const loaded=validateDocument(JSON.parse(await fileInput.files[0].text()));
     stopPlayback(true); selectedSegment = 0; selectedControlId = null; documentState=loaded;
-    activePathId=loaded.paths[0]?.id??null;selectedPointId=loaded.paths[0]?.waypoints[0]?.id??null;history=[JSON.stringify(loaded)];historyIndex=0;persist();render();notify("VantagePath file opened");
+    activePathId=loaded.paths[0]?.id??null;selectedPointId=loaded.paths[0]?.waypoints[0]?.id??null;history=[historySnapshot(loaded)];historyIndex=0;persist();render();notify("VantagePath file opened");
   } catch(error) { notify(error instanceof Error ? error.message : "Could not open that file"); }
   fileInput.value="";
 });
@@ -596,7 +799,14 @@ window.addEventListener("keydown", (event) => {
   const command=event.metaKey||event.ctrlKey;
   if(command&&event.key.toLowerCase()==="z"){event.preventDefault();restore(historyIndex+(event.shiftKey?1:-1));}
   else if(event.key==="Delete"||event.key==="Backspace"){event.preventDefault();deletePoint();}
-  else if(event.key.toLowerCase()==="a"){event.preventDefault();addPoint();}
+  else if(event.key.toLowerCase()==="a"&&!command){event.preventDefault();addPoint();}
+  else if(event.key.startsWith("Arrow")&&!command){
+    event.preventDefault();
+    const step = event.altKey ? 0.25 : event.shiftKey ? 6 : 1;
+    const [dx, dy] = { ArrowLeft:[-step,0], ArrowRight:[step,0], ArrowUp:[0,step], ArrowDown:[0,-step] }[event.key];
+    nudgeSelection(dx, dy);
+  }
 });
 
 render();
+if (startupMessage) notify(startupMessage);
