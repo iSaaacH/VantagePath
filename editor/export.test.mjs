@@ -56,3 +56,17 @@ test("markers follow their segment through split, delete and reverse", () => {
   assert.equal(deletePoint(path, path.waypoints[2].id).path.markers.length, 0, "a marker on a removed segment goes with it");
   assert.equal(deleteMarker(path, "m").markers.length, 0);
 });
+
+test("format 1 files migrate to format 2; newer formats are refused", async () => {
+  const { validateDocument, DOCUMENT_VERSION } = await import("./model.js");
+  const old = makeDocument();
+  old.version = 1;
+  delete old.paths[0].segmentSpeed; delete old.paths[0].markers; delete old.paths[0].waitAfterMs;
+  const migrated = validateDocument(old);
+  assert.equal(migrated.version, DOCUMENT_VERSION);
+  assert.deepEqual(migrated.paths[0].segmentSpeed, [null, null]);
+  assert.deepEqual(migrated.paths[0].markers, []);
+  assert.equal(old.version, 1, "the input is untouched");
+  assert.throws(() => validateDocument({ ...old, version: 99 }), /newer VantagePath Studio/);
+  assert.throws(() => validateDocument({ ...old, version: "2" }), /not a supported/);
+});

@@ -65,6 +65,18 @@ export includes both the GPS pose and its conversion to the trajectory frame.
 Drag the yellow playback robot directly along the selected route to scrub the
 preview. The timeline slider remains available for fine adjustment.
 
+Browser and schema tests live in `tests/studio` (Playwright and Ajv):
+
+```sh
+npm --prefix tests/studio ci
+npx --prefix tests/studio playwright install chromium
+node tests/studio/schema.mjs
+node tests/studio/e2e.mjs       # PW_CHANNEL=chrome to use installed Chrome
+```
+
+`.vpath` files are described by [`vpath.schema.json`](vpath.schema.json)
+(format 2). Studio still opens format 1 files and upgrades them.
+
 ## Code layout
 
 | File | Role |

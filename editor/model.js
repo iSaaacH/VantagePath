@@ -397,7 +397,7 @@ export function dragPosition(origin, pointerStart, pointer, step = 0.25, fine = 
 
 export function makeDocument() {
   const document = {
-    version: 1,
+    version: DOCUMENT_VERSION,
     type: "VantagePathDocument",
     title: "Competition auto",
     game: "V5RC Override 2026-27",
@@ -428,8 +428,24 @@ export function makeDocument() {
   return document;
 }
 
-export function validateDocument(value) {
-  if (!value || value.type !== "VantagePathDocument" || value.version !== 1 || !Array.isArray(value.paths)) throw new Error("This is not a supported VantagePath file.");
+// Format 2 adds per-segment speed limits, event markers and route waits.
+// Format 1 files open unchanged: the new fields default to "none".
+export const DOCUMENT_VERSION = 2;
+const ALLIANCES = ["red", "blue", "skills"];
+
+/**
+ * Checks and normalises a document from storage or a file. Returns a new,
+ * current-format document; the input is not modified.
+ */
+export function validateDocument(input) {
+  if (!input || input.type !== "VantagePathDocument" || !Number.isInteger(input.version) || input.version < 1 || !Array.isArray(input.paths)) throw new Error("This is not a supported VantagePath file.");
+  if (input.version > DOCUMENT_VERSION) throw new Error(`This file was made by a newer VantagePath Studio (format ${input.version}). Update Studio to open it.`);
+  const value = structuredClone(input);
+  value.version = DOCUMENT_VERSION;
+  value.title = typeof value.title === "string" && value.title.trim() ? value.title.trim().slice(0, 120) : "Untitled route";
+  value.alliance = ALLIANCES.includes(value.alliance) ? value.alliance : "red";
+  value.snap = value.snap !== false;
+  value.showZones = value.showZones !== false;
   for (const path of value.paths) {
     if (!path.id || !Array.isArray(path.waypoints)) throw new Error("A path is missing its waypoint data.");
     for (const point of path.waypoints) {

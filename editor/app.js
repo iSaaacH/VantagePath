@@ -486,8 +486,7 @@ document.addEventListener("change", (event) => {
   if (input.dataset.robot) {
     const value = numberFrom(input);
     if (value === null) return render();
-    state.doc.robot = { ...state.doc.robot, [input.dataset.robot]: value };
-    validateDocument(state.doc);
+    state.doc = validateDocument({ ...state.doc, robot: { ...state.doc.robot, [input.dataset.robot]: value } });
     stopPlayback(true);
     commit("Robot setup updated");
   }
